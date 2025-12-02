@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Escapism</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://cdn.jsdelivr.net/npm/p5@1.7.0/lib/p5.min.js"></script>
+    <script>
+        // Only load p5.sound if we're on http/https (not file://)
+        if (window.location.protocol === 'http:' || window.location.protocol === 'https:') {
+            const soundScript = document.createElement('script');
+            soundScript.src = 'https://cdn.jsdelivr.net/npm/p5@1.7.0/lib/addons/p5.sound.min.js';
+            document.head.appendChild(soundScript);
+        }
+    </script>
+</head>
+<body>
+    <div id="canvas-container"></div>
+    <button id="audio-toggle" aria-label="Toggle ambient audio">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M3 9v6h4l5 5V4L7 9H3z"></path>
+            <path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"></path>
+            <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+        </svg>
+    </button>
+    <script src="sketch.js"></script>
+</body>
+</html>
