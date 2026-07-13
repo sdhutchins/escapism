@@ -13,11 +13,79 @@ let sandGrains = [];
 let sandMarks = [];
 let sharkFins = [];
 let finRipples = [];
-let sunClicked = false;
+let nightStars = [];
+let shootingStars = [];
 const MAX_SAND_MARKS = 280;
 const TIDE_CYCLE_DURATION = 60000;
 const TIDE_ADVANCE_PORTION = 0.42;
 const TIDE_PEAK_PORTION = 0.18;
+const MAX_SHOOTING_STARS = 6;
+const sceneModes = ['day', 'sunset', 'night'];
+let sceneModeIndex = 0;
+const dayAudioPlaylist = [
+    {
+        title: 'Daydreaming',
+        artist: 'NxWorries, Anderson .Paak, Knxwledge',
+        filePath: 'assets/audio/NxWorries, Anderson .Paak, Knxwledge - Daydreaming.mp3'
+    },
+    {
+        title: 'Put My Hands On You',
+        artist: 'DEAN, Anderson .Paak',
+        filePath: 'assets/audio/DEAN, Anderson .Paak - Put My Hands On You.mp3'
+    },
+    {
+        title: 'Drowning In You',
+        artist: 'Pascäal',
+        filePath: 'assets/audio/Pascäal - Drowning In You.mp3'
+    },
+    {
+        title: 'Why Don\'t We Fall in Love',
+        artist: 'Amerie',
+        filePath: 'assets/audio/Amerie - Why Don\'t We Fall in Love.mp3'
+    },
+    {
+        title: 'Summer Girl',
+        artist: 'Hush Forte, Q',
+        filePath: 'assets/audio/Hush Forte, Q - Summer Girl.mp3'
+    },
+    {
+        title: 'Precis Two',
+        artist: 'Vansire, Ivy Sole',
+        filePath: 'assets/audio/Vansire, Ivy Sole - Précis Two.mp3'
+    },
+    {
+        title: 'Breathe Deeper',
+        artist: 'Tame Impala',
+        filePath: 'assets/audio/Tame Impala - Breathe Deeper.mp3'
+    }
+];
+const nightAudioPlaylist = [
+    {
+        title: 'Midnight - Solo',
+        artist: 'Lianne La Havas',
+        filePath: 'assets/audio/Lianne La Havas - Midnight - Solo.mp3'
+    },
+    {
+        title: 'Under The Moon',
+        artist: 'Alex Isley, Jack Dine',
+        filePath: 'assets/audio/Alex Isley, Jack Dine - Under The Moon.mp3'
+    },
+    {
+        title: 'Crashing Down',
+        artist: 'SiR',
+        filePath: 'assets/audio/SiR - Crashing Down.mp3'
+    }
+];
+const audioState = {
+    activePlaylist: dayAudioPlaylist,
+    currentTrackIndex: 0,
+    currentAudio: null,
+    isMuted: false,
+    isPlaying: false,
+    volume: 0.1,
+    hasUnlockedAudio: false
+};
+let audioElements = null;
 
 const colorPalette = {
     skyTop: [39, 169, 223],
@@ -39,10 +107,26 @@ const colorPalette = {
     sunsetWaterLight: [118, 182, 201],
     sunsetWaterMid: [96, 156, 179],
     sunsetWaterDark: [73, 128, 152],
+    nightTop: [17, 34, 74],
+    nightMid: [35, 57, 103],
+    nightHorizon: [84, 110, 153],
+    nightCloud: [138, 155, 190],
+    nightWaterLight: [72, 115, 155],
+    nightWaterMid: [51, 87, 127],
+    nightWaterDark: [31, 56, 92],
+    nightSandTop: [180, 179, 191],
+    nightSandBottom: [150, 152, 170],
+    moon: [248, 243, 223],
+    moonGlow: [198, 219, 255],
+    star: [244, 247, 255],
     foam: [210, 231, 238],
+    nightFoam: [181, 205, 226],
     wetSand: [214, 201, 183],
+    nightWetSand: [122, 127, 146],
     boatHull: [122, 98, 83],
-    boatMast: [153, 140, 126]
+    boatMast: [153, 140, 126],
+    nightBoatHull: [79, 79, 101],
+    nightBoatMast: [122, 126, 155]
 };
 
 const sailColors = [
@@ -55,11 +139,14 @@ const sailColors = [
 
 let sailColorIndex = 0;
 
+initializeAudioPlayer();
+
 function setup() {
     const canvas = createCanvas(windowWidth, windowHeight);
     canvas.parent('canvas-container');
     
     colorMode(RGB, 255);
+    initializeNightStars();
     
     for (let i = 0; i < 15; i++) {
         particles.push({
@@ -85,8 +172,261 @@ function setup() {
     }
 }
 
+function initializeAudioPlayer() {
+    audioElements = {
+        currentSong: document.getElementById('current-song'),
+        currentArtist: document.getElementById('current-artist'),
+        previousButton: document.getElementById('previous-track'),
+        playButton: document.getElementById('play-track'),
+        nextButton: document.getElementById('next-track'),
+        muteButton: document.getElementById('mute-track'),
+        playIcon: document.getElementById('play-icon'),
+        muteIcon: document.getElementById('mute-icon'),
+        volumeControl: document.getElementById('volume-control')
+    };
+
+    if (!audioElements.currentSong || !audioElements.currentArtist) {
+        return;
+    }
+
+    audioElements.previousButton.addEventListener('click', () => {
+        stepTrack(-1);
+    });
+
+    audioElements.playButton.addEventListener('click', () => {
+        togglePlayback();
+    });
+
+    audioElements.nextButton.addEventListener('click', () => {
+        stepTrack(1);
+    });
+
+    audioElements.muteButton.addEventListener('click', () => {
+        toggleMute();
+    });
+
+    audioElements.volumeControl.addEventListener('input', (event) => {
+        setVolume(Number(event.target.value));
+    });
+
+    updateAudioInterface();
+    window.addEventListener('load', attemptAutoplay, { once: true });
+    window.addEventListener('pointerdown', unlockAudioOnInteraction, { once: true });
+    window.addEventListener('keydown', unlockAudioOnInteraction, { once: true });
+}
+
+function buildAudioElement(trackIndex) {
+    const audio = new Audio(encodeURI(audioState.activePlaylist[trackIndex].filePath));
+    audio.autoplay = false;
+    audio.preload = 'metadata';
+    audio.muted = audioState.isMuted;
+    audio.volume = audioState.volume;
+    audio.addEventListener('ended', handleTrackEnded);
+    return audio;
+}
+
+function attemptAutoplay() {
+    setCurrentTrack(audioState.currentTrackIndex, false);
+    tryAutoplayWithFallback();
+}
+
+function tryAutoplayWithFallback() {
+    if (!audioState.currentAudio) {
+        audioState.currentAudio = buildAudioElement(audioState.currentTrackIndex);
+    }
+
+    audioState.isMuted = false;
+    audioState.currentAudio.muted = false;
+    audioState.currentAudio.volume = audioState.volume;
+
+    const playPromise = audioState.currentAudio.play();
+
+    if (playPromise && typeof playPromise.then === 'function') {
+        playPromise
+            .then(() => {
+                audioState.isPlaying = true;
+                updateAudioInterface();
+            })
+            .catch(() => {
+                audioState.isMuted = true;
+                audioState.currentAudio.muted = true;
+                playMutedFallback();
+            });
+        return;
+    }
+
+    audioState.isPlaying = true;
+    updateAudioInterface();
+}
+
+function playMutedFallback() {
+    if (!audioState.currentAudio) {
+        return;
+    }
+
+    const fallbackPromise = audioState.currentAudio.play();
+
+    if (fallbackPromise && typeof fallbackPromise.then === 'function') {
+        fallbackPromise
+            .then(() => {
+                audioState.isPlaying = true;
+                updateAudioInterface();
+            })
+            .catch(() => {
+                audioState.isPlaying = false;
+                updateAudioInterface();
+            });
+        return;
+    }
+
+    audioState.isPlaying = true;
+    updateAudioInterface();
+}
+
+function unlockAudioOnInteraction() {
+    audioState.hasUnlockedAudio = true;
+
+    if (audioState.currentAudio) {
+        audioState.isMuted = false;
+        audioState.currentAudio.muted = false;
+        audioState.currentAudio.volume = audioState.volume;
+    } else {
+        setCurrentTrack(audioState.currentTrackIndex, true);
+        audioState.isMuted = false;
+
+        if (audioState.currentAudio) {
+            audioState.currentAudio.muted = false;
+        }
+    }
+
+    updateAudioInterface();
+}
+
+function handleTrackEnded() {
+    audioState.isPlaying = false;
+    stepTrack(1, { shouldPlay: true });
+}
+
+function setCurrentTrack(trackIndex, shouldPlay) {
+    if (audioState.currentAudio) {
+        audioState.currentAudio.pause();
+        audioState.currentAudio.removeEventListener('ended', handleTrackEnded);
+    }
+
+    audioState.currentTrackIndex = trackIndex;
+    audioState.currentAudio = buildAudioElement(trackIndex);
+    audioState.isPlaying = false;
+
+    if (shouldPlay) {
+        playCurrentTrack();
+    } else {
+        updateAudioInterface();
+    }
+}
+
+function playCurrentTrack() {
+    if (!audioState.currentAudio) {
+        audioState.currentAudio = buildAudioElement(audioState.currentTrackIndex);
+    }
+
+    audioState.currentAudio.muted = audioState.isMuted;
+    audioState.currentAudio.volume = audioState.volume;
+    const playPromise = audioState.currentAudio.play();
+
+    if (playPromise && typeof playPromise.then === 'function') {
+        playPromise
+            .then(() => {
+                audioState.isPlaying = true;
+                updateAudioInterface();
+            })
+            .catch(() => {
+                audioState.isPlaying = false;
+                updateAudioInterface();
+            });
+        return;
+    }
+
+    audioState.isPlaying = true;
+    updateAudioInterface();
+}
+
+function togglePlayback() {
+    if (!audioState.currentAudio) {
+        setCurrentTrack(audioState.currentTrackIndex, true);
+        return;
+    }
+
+    if (audioState.isPlaying) {
+        audioState.currentAudio.pause();
+        audioState.isPlaying = false;
+        updateAudioInterface();
+        return;
+    }
+
+    playCurrentTrack();
+}
+
+function stepTrack(direction, options = {}) {
+    const shouldPlay = options.shouldPlay ?? audioState.isPlaying;
+    const nextTrackIndex = (
+        audioState.currentTrackIndex + direction + audioState.activePlaylist.length
+    ) % audioState.activePlaylist.length;
+    setCurrentTrack(nextTrackIndex, shouldPlay);
+}
+
+function toggleMute() {
+    audioState.isMuted = !audioState.isMuted;
+
+    if (audioState.currentAudio) {
+        audioState.currentAudio.muted = audioState.isMuted;
+    }
+
+    updateAudioInterface();
+}
+
+function setVolume(nextVolume) {
+    audioState.volume = constrain(nextVolume, 0, 1);
+
+    if (audioState.currentAudio) {
+        audioState.currentAudio.volume = audioState.volume;
+    }
+
+    if (audioState.volume > 0 && audioState.isMuted) {
+        audioState.isMuted = false;
+
+        if (audioState.currentAudio) {
+            audioState.currentAudio.muted = false;
+        }
+    }
+
+    updateAudioInterface();
+}
+
+function updateAudioInterface() {
+    if (!audioElements) {
+        return;
+    }
+
+    const activeTrack = audioState.activePlaylist[audioState.currentTrackIndex];
+    audioElements.currentSong.textContent = activeTrack.title;
+    audioElements.currentArtist.textContent = activeTrack.artist;
+    audioElements.playButton.setAttribute(
+        'aria-label',
+        audioState.isPlaying ? 'Pause current song' : 'Play current song'
+    );
+    audioElements.playIcon.textContent = audioState.isPlaying ? '⏸' : '▶';
+    audioElements.muteButton.setAttribute(
+        'aria-label',
+        audioState.isMuted ? 'Unmute audio' : 'Mute audio'
+    );
+    audioElements.muteIcon.textContent = audioState.isMuted || audioState.volume === 0 ? '🔇' : '🔊';
+    audioElements.volumeControl.value = String(audioState.volume);
+}
+
 function draw() {
     drawBeachScene();
+    drawNightStars();
+    updateAndDrawShootingStars();
     drawClouds();
     drawWaves();
     drawSailboat();
@@ -101,63 +441,289 @@ function draw() {
     drawSandTexture();
 }
 
+function getSceneMode() {
+    return sceneModes[sceneModeIndex];
+}
+
+function isSunsetMode() {
+    return getSceneMode() === 'sunset';
+}
+
+function isNightMode() {
+    return getSceneMode() === 'night';
+}
+
+function cycleSceneMode() {
+    sceneModeIndex = (sceneModeIndex + 1) % sceneModes.length;
+    syncPlaylistToSceneMode();
+}
+
+function getActivePlaylist() {
+    return isNightMode() ? nightAudioPlaylist : dayAudioPlaylist;
+}
+
+function syncPlaylistToSceneMode() {
+    const nextPlaylist = getActivePlaylist();
+
+    if (audioState.activePlaylist === nextPlaylist) {
+        return;
+    }
+
+    const previousTrack = audioState.activePlaylist[audioState.currentTrackIndex];
+    const nextTrackIndex = nextPlaylist.findIndex((track) => (
+        previousTrack && track.filePath === previousTrack.filePath
+    ));
+
+    audioState.activePlaylist = nextPlaylist;
+
+    if (nextTrackIndex >= 0) {
+        audioState.currentTrackIndex = nextTrackIndex;
+        updateAudioInterface();
+        return;
+    }
+
+    setCurrentTrack(0, audioState.isPlaying);
+}
+
+function getActiveSceneColors() {
+    if (isNightMode()) {
+        return {
+            skyTop: colorPalette.nightTop,
+            skyMid: colorPalette.nightMid,
+            horizon: colorPalette.nightHorizon,
+            cloud: colorPalette.nightCloud,
+            waterLight: colorPalette.nightWaterLight,
+            waterMid: colorPalette.nightWaterMid,
+            waterDark: colorPalette.nightWaterDark,
+            sandTop: colorPalette.nightSandTop,
+            sandBottom: colorPalette.nightSandBottom,
+            wetSand: colorPalette.nightWetSand,
+            foam: colorPalette.nightFoam,
+            sunBody: colorPalette.moon,
+            sunRays: colorPalette.moonGlow,
+            boatHull: colorPalette.nightBoatHull,
+            boatMast: colorPalette.nightBoatMast
+        };
+    }
+
+    if (isSunsetMode()) {
+        return {
+            skyTop: colorPalette.sunsetTop,
+            skyMid: colorPalette.sunsetBottom,
+            horizon: colorPalette.horizon,
+            cloud: colorPalette.sunsetCloud,
+            waterLight: colorPalette.sunsetWaterLight,
+            waterMid: colorPalette.sunsetWaterMid,
+            waterDark: colorPalette.sunsetWaterDark,
+            sandTop: colorPalette.sandTop,
+            sandBottom: colorPalette.sandBottom,
+            wetSand: colorPalette.wetSand,
+            foam: colorPalette.foam,
+            sunBody: colorPalette.sunsetSun,
+            sunRays: colorPalette.sunsetSunRays,
+            boatHull: colorPalette.boatHull,
+            boatMast: colorPalette.boatMast
+        };
+    }
+
+    return {
+        skyTop: colorPalette.skyTop,
+        skyMid: colorPalette.skyMid,
+        horizon: colorPalette.horizon,
+        cloud: colorPalette.particle,
+        waterLight: colorPalette.waterLight,
+        waterMid: colorPalette.waterMid,
+        waterDark: colorPalette.waterDark,
+        sandTop: colorPalette.sandTop,
+        sandBottom: colorPalette.sandBottom,
+        wetSand: colorPalette.wetSand,
+        foam: colorPalette.foam,
+        sunBody: colorPalette.sun,
+        sunRays: colorPalette.sunRays,
+        boatHull: colorPalette.boatHull,
+        boatMast: colorPalette.boatMast
+    };
+}
+
+function initializeNightStars() {
+    nightStars = [];
+
+    for (let i = 0; i < 55; i++) {
+        nightStars.push(createNightStar());
+    }
+}
+
+function createNightStar() {
+    return {
+        x: random(width),
+        y: random(height * 0.08, height * 0.52),
+        size: random(1.8, 4.6),
+        twinkleOffset: random(TWO_PI),
+        twinkleSpeed: random(0.01, 0.03),
+        opacity: random(80, 170),
+        isVisible: true,
+        reappearAt: 0
+    };
+}
+
 function drawBeachScene() {
     const skyHeight = height * 0.6;
     const horizonY = height * 0.65;
+    const activeColors = getActiveSceneColors();
     
     noStroke();
-    
-    if (sunClicked) {
-        for (let i = 0; i < 60; i++) {
-            const y1 = map(i, 0, 60, 0, skyHeight);
-            const y2 = map(i + 1, 0, 60, 0, skyHeight);
-            const inter = i / 60;
-            const r = lerp(colorPalette.sunsetTop[0], colorPalette.sunsetBottom[0], inter);
-            const g = lerp(colorPalette.sunsetTop[1], colorPalette.sunsetBottom[1], inter);
-            const b = lerp(colorPalette.sunsetTop[2], colorPalette.sunsetBottom[2], inter);
-            fill(r, g, b);
-            rect(0, y1, width, y2 - y1);
+
+    for (let i = 0; i < 60; i++) {
+        const y1 = map(i, 0, 60, 0, skyHeight);
+        const y2 = map(i + 1, 0, 60, 0, skyHeight);
+        const inter = i / 60;
+        const r = lerp(activeColors.skyTop[0], activeColors.skyMid[0], inter);
+        const g = lerp(activeColors.skyTop[1], activeColors.skyMid[1], inter);
+        const b = lerp(activeColors.skyTop[2], activeColors.skyMid[2], inter);
+        fill(r, g, b);
+        rect(0, y1, width, y2 - y1);
+    }
+
+    for (let i = 0; i < 15; i++) {
+        const y1 = map(i, 0, 15, skyHeight, horizonY);
+        const inter = i / 15;
+        const r = lerp(activeColors.skyMid[0], activeColors.horizon[0], inter);
+        const g = lerp(activeColors.skyMid[1], activeColors.horizon[1], inter);
+        const b = lerp(activeColors.skyMid[2], activeColors.horizon[2], inter);
+        fill(r, g, b);
+        rect(0, y1, width, (horizonY - skyHeight) / 15);
+    }
+
+    if (isNightMode()) {
+        fill(colorPalette.moonGlow[0], colorPalette.moonGlow[1], colorPalette.moonGlow[2], 35);
+        ellipse(width * 0.5, horizonY + 12, width * 0.58, 54);
+    }
+}
+
+function drawNightStars() {
+    if (!isNightMode()) {
+        return;
+    }
+
+    noStroke();
+
+    for (const star of nightStars) {
+        if (!star.isVisible) {
+            if (millis() >= star.reappearAt) {
+                Object.assign(star, createNightStar());
+            } else {
+                continue;
+            }
         }
-        
-        for (let i = 0; i < 15; i++) {
-            const y1 = map(i, 0, 15, skyHeight, horizonY);
-            const inter = i / 15;
-            const r = lerp(colorPalette.sunsetBottom[0], colorPalette.horizon[0], inter);
-            const g = lerp(colorPalette.sunsetBottom[1], colorPalette.horizon[1], inter);
-            const b = lerp(colorPalette.sunsetBottom[2], colorPalette.horizon[2], inter);
-            fill(r, g, b);
-            rect(0, y1, width, (horizonY - skyHeight) / 15);
+
+        const twinkle = (sin(frameCount * star.twinkleSpeed + star.twinkleOffset) + 1) * 0.5;
+        const starOpacity = star.opacity + twinkle * 70;
+        fill(colorPalette.star[0], colorPalette.star[1], colorPalette.star[2], starOpacity);
+        circle(star.x, star.y, star.size + twinkle * 0.8);
+    }
+}
+
+function updateAndDrawShootingStars() {
+    if (!isNightMode()) {
+        shootingStars = [];
+        return;
+    }
+
+    for (let i = shootingStars.length - 1; i >= 0; i--) {
+        const shootingStar = shootingStars[i];
+        shootingStar.x += shootingStar.velocityX;
+        shootingStar.y += shootingStar.velocityY;
+        shootingStar.opacity -= shootingStar.fadeSpeed;
+        shootingStar.tailLength += 0.8;
+
+        if (
+            shootingStar.opacity <= 0 ||
+            shootingStar.x > width + 120 ||
+            shootingStar.y > height + 120 ||
+            shootingStar.x < -120
+        ) {
+            shootingStars.splice(i, 1);
+            continue;
         }
-    } else {
-        for (let i = 0; i < 60; i++) {
-            const y1 = map(i, 0, 60, 0, skyHeight);
-            const y2 = map(i + 1, 0, 60, 0, skyHeight);
-            const inter = i / 60;
-            const r = lerp(colorPalette.skyTop[0], colorPalette.skyMid[0], inter);
-            const g = lerp(colorPalette.skyTop[1], colorPalette.skyMid[1], inter);
-            const b = lerp(colorPalette.skyTop[2], colorPalette.skyMid[2], inter);
-            fill(r, g, b);
-            rect(0, y1, width, y2 - y1);
+
+        drawShootingStarTail(shootingStar);
+
+        noStroke();
+        fill(colorPalette.star[0], colorPalette.star[1], colorPalette.star[2], shootingStar.opacity);
+        circle(shootingStar.x, shootingStar.y, shootingStar.size);
+    }
+}
+
+function drawShootingStarTail(shootingStar) {
+    const tailSegments = 7;
+    const tailStartX = shootingStar.x - shootingStar.velocityX * shootingStar.tailLength;
+    const tailStartY = shootingStar.y - shootingStar.velocityY * shootingStar.tailLength;
+    const tailMidX = lerp(tailStartX, shootingStar.x, 0.68);
+    const tailMidY = lerp(tailStartY, shootingStar.y, 0.68);
+
+    strokeCap(ROUND);
+
+    stroke(colorPalette.star[0], colorPalette.star[1], colorPalette.star[2], shootingStar.opacity * 0.16);
+    strokeWeight(shootingStar.size * 0.5);
+    line(tailStartX, tailStartY, shootingStar.x, shootingStar.y);
+
+    stroke(colorPalette.star[0], colorPalette.star[1], colorPalette.star[2], shootingStar.opacity * 0.5);
+    strokeWeight(shootingStar.size * 0.34);
+    line(tailMidX, tailMidY, shootingStar.x, shootingStar.y);
+
+    noStroke();
+    fill(colorPalette.star[0], colorPalette.star[1], colorPalette.star[2], shootingStar.opacity * 0.25);
+    circle(shootingStar.x, shootingStar.y, shootingStar.size * 2.1);
+}
+
+function checkNightStarClick(mx, my) {
+    if (!isNightMode()) {
+        return null;
+    }
+
+    for (const star of nightStars) {
+        if (!star.isVisible) {
+            continue;
         }
-        
-        for (let i = 0; i < 15; i++) {
-            const y1 = map(i, 0, 15, skyHeight, horizonY);
-            const inter = i / 15;
-            const r = lerp(colorPalette.skyMid[0], colorPalette.horizon[0], inter);
-            const g = lerp(colorPalette.skyMid[1], colorPalette.horizon[1], inter);
-            const b = lerp(colorPalette.skyMid[2], colorPalette.horizon[2], inter);
-            fill(r, g, b);
-            rect(0, y1, width, (horizonY - skyHeight) / 15);
+
+        if (dist(mx, my, star.x, star.y) <= star.size + 5) {
+            return star;
         }
     }
+
+    return null;
+}
+
+function createShootingStar(star) {
+    if (shootingStars.length >= MAX_SHOOTING_STARS) {
+        shootingStars.shift();
+    }
+
+    star.isVisible = false;
+    star.reappearAt = millis() + 60000;
+    const launchAngle = random(-PI * 0.9, PI * 0.15);
+    const launchSpeed = random(5.8, 8.8);
+    const velocityX = cos(launchAngle) * launchSpeed;
+    const velocityY = sin(launchAngle) * launchSpeed;
+
+    shootingStars.push({
+        x: star.x,
+        y: star.y,
+        velocityX: velocityX,
+        velocityY: velocityY,
+        tailLength: random(4, 7),
+        fadeSpeed: random(0.8, 1.2),
+        opacity: 255,
+        size: max(2.2, star.size * 0.95)
+    });
 }
 
 function drawClouds() {
     const time = frameCount * 0.003;
-    const activeCloudColor = sunClicked ? colorPalette.sunsetCloud : colorPalette.particle;
+    const activeColors = getActiveSceneColors();
     
     noStroke();
-    fill(activeCloudColor[0], activeCloudColor[1], activeCloudColor[2], 200);
+    fill(activeColors.cloud[0], activeColors.cloud[1], activeColors.cloud[2], isNightMode() ? 120 : 200);
     
     for (let i = 0; i < 4; i++) {
         const cloudX = (width * 0.2) + (i * width * 0.25) + sin(time + i * 0.5) * 15;
@@ -243,6 +809,7 @@ function getSailboatState() {
 function drawSailboat() {
     const sailboat = getSailboatState();
     const activeSailColor = sailColors[sailColorIndex];
+    const activeColors = getActiveSceneColors();
 
     push();
     translate(sailboat.x, sailboat.y);
@@ -251,7 +818,7 @@ function drawSailboat() {
     fill(84, 120, 140, 40);
     ellipse(0, 8, sailboat.width * 1.05, 10);
 
-    fill(colorPalette.boatHull[0], colorPalette.boatHull[1], colorPalette.boatHull[2]);
+    fill(activeColors.boatHull[0], activeColors.boatHull[1], activeColors.boatHull[2]);
     beginShape();
     vertex(-sailboat.width * 0.38, 0);
     vertex(sailboat.width * 0.32, 0);
@@ -259,7 +826,7 @@ function drawSailboat() {
     vertex(-sailboat.width * 0.3, sailboat.height * 0.18);
     endShape(CLOSE);
 
-    stroke(colorPalette.boatMast[0], colorPalette.boatMast[1], colorPalette.boatMast[2]);
+    stroke(activeColors.boatMast[0], activeColors.boatMast[1], activeColors.boatMast[2]);
     strokeWeight(2.2);
     line(-3, 0, -3, -sailboat.height);
 
@@ -421,32 +988,43 @@ function drawSun() {
     const sunSize = 80;
     const rayLength = 40;
     const numRays = 16;
-    const activeSunColor = sunClicked ? colorPalette.sunsetSun : colorPalette.sun;
-    const activeRayColor = sunClicked ? colorPalette.sunsetSunRays : colorPalette.sunRays;
-    const rayRotationSpeed = sunClicked ? 0.004 : 0.01;
+    const activeColors = getActiveSceneColors();
+    const rayRotationSpeed = isSunsetMode() ? 0.004 : 0.01;
     
     push();
     translate(sunX, sunY);
-    rotate(frameCount * rayRotationSpeed);
-    
-    noStroke();
-    
-    for (let i = 0; i < numRays; i++) {
-        const angle = (TWO_PI / numRays) * i;
-        const x1 = cos(angle) * (sunSize / 2 + 10);
-        const y1 = sin(angle) * (sunSize / 2 + 10);
-        const x2 = cos(angle) * (sunSize / 2 + rayLength);
-        const y2 = sin(angle) * (sunSize / 2 + rayLength);
-        
-        stroke(activeRayColor[0], activeRayColor[1], activeRayColor[2], 200);
-        strokeWeight(4);
-        line(x1, y1, x2, y2);
+
+    if (isNightMode()) {
+        noStroke();
+        fill(colorPalette.moonGlow[0], colorPalette.moonGlow[1], colorPalette.moonGlow[2], 55);
+        ellipse(-4, 2, sunSize * 0.68, sunSize * 0.68);
+
+        fill(activeColors.sunBody[0], activeColors.sunBody[1], activeColors.sunBody[2]);
+        ellipse(0, 0, sunSize * 0.66, sunSize * 0.66);
+
+        fill(colorPalette.nightTop[0], colorPalette.nightTop[1], colorPalette.nightTop[2], 255);
+        ellipse(sunSize * 0.17, 0, sunSize * 0.62, sunSize * 0.62);
+    } else {
+        rotate(frameCount * rayRotationSpeed);
+        noStroke();
+
+        for (let i = 0; i < numRays; i++) {
+            const angle = (TWO_PI / numRays) * i;
+            const x1 = cos(angle) * (sunSize / 2 + 10);
+            const y1 = sin(angle) * (sunSize / 2 + 10);
+            const x2 = cos(angle) * (sunSize / 2 + rayLength);
+            const y2 = sin(angle) * (sunSize / 2 + rayLength);
+            
+            stroke(activeColors.sunRays[0], activeColors.sunRays[1], activeColors.sunRays[2], 200);
+            strokeWeight(4);
+            line(x1, y1, x2, y2);
+        }
+
+        fill(activeColors.sunBody[0], activeColors.sunBody[1], activeColors.sunBody[2]);
+        noStroke();
+        ellipse(0, 0, sunSize, sunSize);
     }
-    
-    fill(activeSunColor[0], activeSunColor[1], activeSunColor[2]);
-    noStroke();
-    ellipse(0, 0, sunSize, sunSize);
-    
+
     pop();
 }
 
@@ -460,10 +1038,12 @@ function checkSunClick(mx, my) {
 
 function drawWaves() {
     const horizonY = height * 0.65;
-    const time = frameCount * 0.02;
-    const waterLight = sunClicked ? colorPalette.sunsetWaterLight : colorPalette.waterLight;
-    const waterMid = sunClicked ? colorPalette.sunsetWaterMid : colorPalette.waterMid;
-    const waterDark = sunClicked ? colorPalette.sunsetWaterDark : colorPalette.waterDark;
+    const waveTimeScale = isNightMode() ? 0.012 : 0.02;
+    const time = frameCount * waveTimeScale;
+    const activeColors = getActiveSceneColors();
+    const waterLight = activeColors.waterLight;
+    const waterMid = activeColors.waterMid;
+    const waterDark = activeColors.waterDark;
     
     noStroke();
     
@@ -505,29 +1085,32 @@ function drawWaves() {
 
 function drawSand() {
     const horizonY = height * 0.65;
+    const activeColors = getActiveSceneColors();
     
     noStroke();
     
-    fill(colorPalette.sandTop[0], colorPalette.sandTop[1], colorPalette.sandTop[2]);
+    fill(activeColors.sandTop[0], activeColors.sandTop[1], activeColors.sandTop[2]);
     ellipse(width * 0.5, height - 50, width * 2, height - horizonY + 100);
     
-    fill(colorPalette.sandBottom[0], colorPalette.sandBottom[1], colorPalette.sandBottom[2]);
+    fill(activeColors.sandBottom[0], activeColors.sandBottom[1], activeColors.sandBottom[2]);
     ellipse(width * 0.5, height - 30, width * 1.8, height - horizonY + 80);
 }
 
 function updateAndDrawTideWash() {
     const horizonY = height * 0.65;
     const shorelineY = horizonY + 34;
-    const tideProgress = (millis() % TIDE_CYCLE_DURATION) / TIDE_CYCLE_DURATION;
+    const activeTideCycleDuration = isNightMode() ? TIDE_CYCLE_DURATION * 1.4 : TIDE_CYCLE_DURATION;
+    const tideProgress = (millis() % activeTideCycleDuration) / activeTideCycleDuration;
     const tideReach = getTideReach(tideProgress);
     const washFrontY = shorelineY + tideReach;
-    const waterLight = sunClicked ? colorPalette.sunsetWaterLight : colorPalette.waterLight;
-    const waterMid = sunClicked ? colorPalette.sunsetWaterMid : colorPalette.waterMid;
+    const activeColors = getActiveSceneColors();
+    const waterLight = activeColors.waterLight;
+    const waterMid = activeColors.waterMid;
 
     softenSandMarksForTideWash(washFrontY);
 
     noStroke();
-    fill(colorPalette.wetSand[0], colorPalette.wetSand[1], colorPalette.wetSand[2], 110);
+    fill(activeColors.wetSand[0], activeColors.wetSand[1], activeColors.wetSand[2], 110);
     ellipse(width * 0.5, shorelineY + tideReach * 0.58, width * 1.8, tideReach * 1.35 + 28);
 
     fill(waterMid[0], waterMid[1], waterMid[2], 155);
@@ -547,7 +1130,7 @@ function updateAndDrawTideWash() {
     );
 
     noStroke();
-    fill(colorPalette.foam[0], colorPalette.foam[1], colorPalette.foam[2], 120);
+    fill(activeColors.foam[0], activeColors.foam[1], activeColors.foam[2], 120);
     beginShape();
     for (let x = -20; x <= width + 20; x += 12) {
         const outerFoamY = washFrontY + sin((x * 0.018) + frameCount * 0.045) * 5;
@@ -559,7 +1142,7 @@ function updateAndDrawTideWash() {
     }
     endShape(CLOSE);
 
-    fill(colorPalette.foam[0], colorPalette.foam[1], colorPalette.foam[2], 150);
+    fill(activeColors.foam[0], activeColors.foam[1], activeColors.foam[2], 150);
     beginShape();
     for (let x = -20; x <= width + 20; x += 10) {
         const crestY = washFrontY + sin((x * 0.024) + frameCount * 0.05) * 4;
@@ -571,7 +1154,7 @@ function updateAndDrawTideWash() {
     }
     endShape(CLOSE);
 
-    fill(colorPalette.foam[0], colorPalette.foam[1], colorPalette.foam[2], 80);
+    fill(activeColors.foam[0], activeColors.foam[1], activeColors.foam[2], 80);
     beginShape();
     for (let x = -20; x <= width + 20; x += 14) {
         const trailingOuterY = washFrontY - 7 + sin((x * 0.02) + frameCount * 0.035 + 1.2) * 2.4;
@@ -606,14 +1189,15 @@ function easeInOutSine(value) {
 function drawSandTexture() {
     const horizonY = height * 0.65;
     const sandStartY = horizonY + 30;
+    const activeColors = getActiveSceneColors();
     
     noStroke();
     
     for (let grain of sandGrains) {
         if (grain.y >= sandStartY && grain.y <= height) {
-            const r = constrain(colorPalette.sandTop[0] + grain.brightness, 220, 250);
-            const g = constrain(colorPalette.sandTop[1] + grain.brightness, 215, 245);
-            const b = constrain(colorPalette.sandTop[2] + grain.brightness, 200, 230);
+            const r = constrain(activeColors.sandTop[0] + grain.brightness, activeColors.sandTop[0] - 20, activeColors.sandTop[0] + 20);
+            const g = constrain(activeColors.sandTop[1] + grain.brightness, activeColors.sandTop[1] - 20, activeColors.sandTop[1] + 20);
+            const b = constrain(activeColors.sandTop[2] + grain.brightness, activeColors.sandTop[2] - 20, activeColors.sandTop[2] + 20);
             
             fill(r, g, b, grain.opacity);
             circle(grain.x, grain.y, grain.size);
@@ -626,9 +1210,9 @@ function drawSandTexture() {
         const size = random(0.5, 2);
         const brightness = random(-10, 10);
         
-        const r = constrain(colorPalette.sandTop[0] + brightness, 230, 250);
-        const g = constrain(colorPalette.sandTop[1] + brightness, 225, 245);
-        const b = constrain(colorPalette.sandTop[2] + brightness, 210, 235);
+        const r = constrain(activeColors.sandTop[0] + brightness, activeColors.sandTop[0] - 14, activeColors.sandTop[0] + 14);
+        const g = constrain(activeColors.sandTop[1] + brightness, activeColors.sandTop[1] - 14, activeColors.sandTop[1] + 14);
+        const b = constrain(activeColors.sandTop[2] + brightness, activeColors.sandTop[2] - 14, activeColors.sandTop[2] + 14);
         
         fill(r, g, b, random(80, 150));
         circle(x, y, size);
@@ -675,6 +1259,8 @@ function softenSandMarksForTideWash(washFrontY) {
 }
 
 function updateAndDrawParticles() {
+    const particleOpacityScale = isNightMode() ? 1.75 : 1;
+
     for (let particle of particles) {
         particle.y += particle.speed;
         
@@ -683,7 +1269,7 @@ function updateAndDrawParticles() {
             particle.x = random(width);
         }
         
-        fill(colorPalette.particle[0], colorPalette.particle[1], colorPalette.particle[2], particle.opacity);
+        fill(colorPalette.particle[0], colorPalette.particle[1], colorPalette.particle[2], particle.opacity * particleOpacityScale);
         noStroke();
         circle(particle.x, particle.y, particle.size);
     }
@@ -773,6 +1359,7 @@ function createSandMark(startX, startY, endX, endY) {
 function mousePressed() {
     const clickedSailboat = checkSailboatClick(mouseX, mouseY);
     const clickedSun = checkSunClick(mouseX, mouseY);
+    const clickedNightStar = checkNightStarClick(mouseX, mouseY);
     const clickedCloud = checkCloudClick(mouseX, mouseY);
     const clickedWater = checkWaterClick(mouseX, mouseY);
     const clickedSand = checkSandClick(mouseX, mouseY);
@@ -780,7 +1367,9 @@ function mousePressed() {
     if (clickedSailboat) {
         sailColorIndex = (sailColorIndex + 1) % sailColors.length;
     } else if (clickedSun) {
-        sunClicked = !sunClicked;
+        cycleSceneMode();
+    } else if (clickedNightStar) {
+        createShootingStar(clickedNightStar);
     } else if (clickedCloud) {
         startRain(clickedCloud.x, clickedCloud.y);
     } else if (clickedWater) {
@@ -819,6 +1408,7 @@ function mouseReleased() {
 function touchStarted() {
     const clickedSailboat = checkSailboatClick(mouseX, mouseY);
     const clickedSun = checkSunClick(mouseX, mouseY);
+    const clickedNightStar = checkNightStarClick(mouseX, mouseY);
     const clickedCloud = checkCloudClick(mouseX, mouseY);
     const clickedWater = checkWaterClick(mouseX, mouseY);
     const clickedSand = checkSandClick(mouseX, mouseY);
@@ -826,7 +1416,9 @@ function touchStarted() {
     if (clickedSailboat) {
         sailColorIndex = (sailColorIndex + 1) % sailColors.length;
     } else if (clickedSun) {
-        sunClicked = !sunClicked;
+        cycleSceneMode();
+    } else if (clickedNightStar) {
+        createShootingStar(clickedNightStar);
     } else if (clickedCloud) {
         startRain(clickedCloud.x, clickedCloud.y);
     } else if (clickedWater) {
@@ -878,6 +1470,7 @@ function createRipple(x, y) {
 
 function windowResized() {
     resizeCanvas(windowWidth, windowHeight);
+    initializeNightStars();
     
     const horizonY = height * 0.65;
     const sandStartY = horizonY + 30;

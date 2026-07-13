@@ -14,6 +14,11 @@ body {
     padding: 0;
 }
 
+main {
+    width: 100%;
+    height: 100%;
+}
+
 #canvas-container {
     width: 100%;
     height: 100%;
@@ -28,36 +33,125 @@ body {
     height: 100% !important;
 }
 
-#audio-toggle {
+.audio-player {
     position: fixed;
     top: 20px;
     right: 20px;
-    width: 40px;
-    height: 40px;
-    border: none;
-    background: rgba(255, 255, 255, 0.2);
-    border-radius: 50%;
-    cursor: pointer;
+    z-index: 100;
+    width: min(280px, calc(100vw - 32px));
+    padding: 14px 16px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 18px;
+    background: rgba(255, 255, 255, 0.08);
+    backdrop-filter: blur(10px);
+    color: rgba(255, 255, 255, 0.82);
+}
+
+.audio-player__label {
+    font-size: 0.62rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.56);
+}
+
+.audio-player__track {
+    margin-top: 3px;
+}
+
+.audio-player__song {
+    font-size: 0.82rem;
+    line-height: 1.15;
+    color: rgba(255, 255, 255, 0.82);
+}
+
+.audio-player__artist {
+    margin-top: 2px;
+    font-size: 0.72rem;
+    line-height: 1.15;
+    color: rgba(255, 255, 255, 0.48);
+}
+
+.audio-player__controls {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 12px;
+}
+
+.audio-player__icon-button {
+    display: inline-flex;
+    align-items: center;
     justify-content: center;
-    color: rgba(255, 255, 255, 0.6);
-    backdrop-filter: blur(4px);
-    transition: all 0.3s ease;
-    z-index: 100;
+    min-width: 38px;
+    min-height: 38px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 999px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.76);
+    padding: 0;
+    cursor: pointer;
+    transition: background 0.3s ease, color 0.3s ease, transform 0.3s ease;
 }
 
-#audio-toggle:hover {
-    background: rgba(255, 255, 255, 0.3);
-    color: rgba(255, 255, 255, 0.8);
-    transform: scale(1.1);
+.audio-player__icon-button:hover,
+.audio-player__icon-button:focus-visible {
+    background: rgba(255, 255, 255, 0.12);
+    color: rgba(255, 255, 255, 0.9);
+    outline: none;
 }
 
-#audio-toggle:active {
-    transform: scale(0.95);
+.audio-player__icon-button:active {
+    transform: scale(0.96);
 }
 
-#audio-toggle svg {
-    width: 20px;
-    height: 20px;
+.audio-player__icon-button span {
+    font-size: 1rem;
+    line-height: 1;
+}
+
+.audio-player__volume {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin-left: 4px;
+    color: rgba(255, 255, 255, 0.56);
+}
+
+.audio-player__volume-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+#volume-control {
+    width: 72px;
+    accent-color: rgba(255, 255, 255, 0.72);
+    background: transparent;
+    cursor: pointer;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .audio-player__icon-button {
+        transition: none;
+    }
+}
+
+@media (max-width: 640px) {
+    .audio-player {
+        top: auto;
+        right: 16px;
+        bottom: 16px;
+        width: min(260px, calc(100vw - 32px));
+    }
+
+    #volume-control {
+        width: 60px;
+    }
 }

@@ -16,14 +16,42 @@
     </script>
 </head>
 <body>
-    <div id="canvas-container"></div>
-    <button id="audio-toggle" aria-label="Toggle ambient audio">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M3 9v6h4l5 5V4L7 9H3z"></path>
-            <path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02z"></path>
-            <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path>
-        </svg>
-    </button>
+    <main>
+        <div id="canvas-container"></div>
+        <section class="audio-player" aria-label="Audio controls">
+            <p class="audio-player__label">Now playing</p>
+            <div class="audio-player__track">
+                <p class="audio-player__song" id="current-song">Daydreaming</p>
+                <p class="audio-player__artist" id="current-artist">NxWorries, Anderson .Paak, Knxwledge</p>
+            </div>
+            <div class="audio-player__controls">
+                <button type="button" id="previous-track" class="audio-player__icon-button" aria-label="Play previous song" title="Previous">
+                    <span aria-hidden="true">⏮</span>
+                </button>
+                <button type="button" id="play-track" class="audio-player__icon-button" aria-label="Play current song" title="Play or pause">
+                    <span id="play-icon" aria-hidden="true">▶</span>
+                </button>
+                <button type="button" id="next-track" class="audio-player__icon-button" aria-label="Play next song" title="Next">
+                    <span aria-hidden="true">⏭</span>
+                </button>
+                <button type="button" id="mute-track" class="audio-player__icon-button" aria-label="Mute audio" title="Mute or unmute">
+                    <span id="mute-icon" aria-hidden="true">🔊</span>
+                </button>
+                <label class="audio-player__volume" for="volume-control">
+                    <span class="audio-player__volume-label">Volume</span>
+                    <input
+                        type="range"
+                        id="volume-control"
+                        min="0"
+                        max="1"
+                        step="0.05"
+                        value="0.1"
+                        aria-label="Adjust volume"
+                    >
+                </label>
+            </div>
+        </section>
+    </main>
     <script src="sketch.js"></script>
 </body>
 </html>
