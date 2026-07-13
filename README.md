@@ -10,9 +10,9 @@ An interactive beach scene with animated waves, clouds, and soothing interaction
 
 1. Serve the files using a local HTTP server:
    ```bash
-   python3 -m http.server 8000
+   python3 -m http.server 8020
    ```
-2. Open `http://localhost:8000` in your browser
+2. Open `http://localhost:8020` in your browser
 
 ## Features
 
