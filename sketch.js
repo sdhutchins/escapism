@@ -48,6 +48,10 @@ const sunsetConfig = {
     sunHeightAboveHorizon: 8,
     sunSinkDistance: 88,
     glowRadiusRatio: 0.38,
+    reflectionBands: 24,
+    reflectionReachRatio: 0.14,
+    reflectionWidthRatio: 0.08,
+    reflectionOpacity: 65,
     skyMidpointRatio: 0.4
 };
 const moonConfig = {
@@ -719,6 +723,7 @@ function draw() {
     drawSun();
     drawClouds();
     drawWaves();
+    drawSunsetReflection();
     drawSailboat();
     drawSand();
     updateAndDrawTideWash();
@@ -1387,6 +1392,27 @@ function drawMoon(opacity) {
     drawingContext.shadowBlur = moonConfig.glowBlur;
     drawingContext.fill(moonCrescentPath);
     drawingContext.restore();
+}
+
+function drawSunsetReflection() {
+    const strength = getSunsetBlend();
+    if (strength < 0.001) return;
+    const sun = getSunState();
+    const reflectionReach = height * sunsetConfig.reflectionReachRatio;
+    const time = reducedMotionPreference.matches ? 0 : millis() * 0.00035;
+    push();
+    noStroke();
+    // A fixed number of broken glints suggests small waves without spawning particles.
+    for (let band = 0; band < sunsetConfig.reflectionBands; band++) {
+        const distance = band / (sunsetConfig.reflectionBands - 1);
+        const shimmer = 0.65 + 0.35 * sin(band * 2.4 + time);
+        const breadth = lerp(sun.size * 0.35, width * sunsetConfig.reflectionWidthRatio, distance);
+        const drift = sin(band * 1.8 + time) * breadth * 0.16;
+        const y = sun.horizonY + 3 + distance * reflectionReach;
+        fill(255, 213, 155, strength * (1 - distance) * shimmer * sunsetConfig.reflectionOpacity);
+        ellipse(sun.x + drift, y, breadth * shimmer, lerp(1.5, 3.5, distance));
+    }
+    pop();
 }
 
 function checkSunClick(mx, my) {
