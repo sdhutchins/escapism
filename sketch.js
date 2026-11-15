@@ -144,6 +144,8 @@ const colorPalette = {
     sunsetSun: [255, 234, 166],
     sunsetSunRays: [233, 96, 52],
     sunsetCloud: [223, 187, 163],
+    sunsetCloudShadow: [165, 148, 139],
+    sunsetCloudHighlight: [255, 187, 143],
     sunsetWaterLight: [153, 163, 166],
     sunsetWaterMid: [129, 145, 153],
     sunsetWaterDark: [106, 126, 140],
@@ -1010,6 +1012,7 @@ function drawClouds() {
         
         push();
         translate(cloudX, cloudY);
+        shadeSunsetCloud(cloudSize, activeColors.cloud);
         
         ellipse(0, 0, cloudSize, cloudSize * 0.6);
         ellipse(cloudSize * 0.4, 0, cloudSize * 0.7, cloudSize * 0.5);
@@ -1019,6 +1022,26 @@ function drawClouds() {
         
         pop();
     }
+}
+
+function shadeSunsetCloud(cloudSize, cloudColor) {
+    const sunsetBlend = getSunsetBlend();
+    if (sunsetBlend <= 0.001) return;
+    const cloudOpacity = (200 - 80 * getNightBlend()) / 255;
+    const gradient = drawingContext.createLinearGradient(0, -cloudSize * 0.4, 0, cloudSize * 0.25);
+    const shadow = colorPalette.sunsetCloudShadow;
+    const highlight = colorPalette.sunsetCloudHighlight;
+    // Low sunlight warms the underside while the cloud tops stay in cool shadow.
+    gradient.addColorStop(0, blendCloudLight(cloudColor, shadow, sunsetBlend, cloudOpacity));
+    gradient.addColorStop(1, blendCloudLight(cloudColor, highlight, sunsetBlend, cloudOpacity));
+    drawingContext.fillStyle = gradient;
+}
+
+function blendCloudLight(cloudColor, lightColor, amount, opacity) {
+    const red = lerp(cloudColor[0], lightColor[0], amount);
+    const green = lerp(cloudColor[1], lightColor[1], amount);
+    const blue = lerp(cloudColor[2], lightColor[2], amount);
+    return `rgba(${red}, ${green}, ${blue}, ${opacity})`;
 }
 
 function getCloudPositions() {
@@ -1258,6 +1281,10 @@ function updateAndDrawRain() {
         
         line(droplet.x, droplet.y, droplet.x, droplet.y + droplet.length);
     }
+}
+
+function getSunsetBlend() {
+    return Math.max(0, 1 - Math.abs(timeDialState.scenePosition - 1));
 }
 
 function drawSun() {
