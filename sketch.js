@@ -34,6 +34,12 @@ const timeDialConfig = {
     ticksPerMood: 2,
     settlingSeconds: 0.16,
     colorTransitionSeconds: 2.6,
+    minimumTickInterval: 0.025,
+    tickDuration: 0.006,
+    tickDecay: 0.2,
+    tickLowpassFrequency: 6500,
+    tickHighpassFrequency: 1100,
+    tickGain: 0.6
 };
 // State: the requested mood, its visible position, and one captured gesture.
 const timeDialState = {
@@ -46,6 +52,12 @@ const timeDialState = {
     pointerId: null,
     dragStartX: 0,
     dragStartValue: 0,
+    lastTick: 0,
+    audioContext: null,
+    tickBuffer: null,
+    isResumingAudio: false,
+    hasPendingTick: false,
+    lastTickTime: -Infinity
 };
 const reducedMotionPreference = window.matchMedia('(prefers-reduced-motion: reduce)');
 let timeDialElements = null;
@@ -209,6 +221,12 @@ function initializeTimeDial() {
     const container = timeDialElements.container;
     if (!input || !container) return;
 
+    // Unlock before target handlers run: the existing player unlocks sound on the first gesture.
+    container.addEventListener('pointerdown', prepareDialSound, { capture: true });
+    // Some mobile browsers grant audio permission only when the first touch ends.
+    container.addEventListener('pointerup', prepareDialSound, { capture: true });
+    container.addEventListener('touchend', prepareDialSound, { capture: true, passive: true });
+    input.addEventListener('keydown', prepareDialSound, { capture: true });
     // Input: pointer capture keeps mouse and touch on the same bounded drag path.
     container.addEventListener('pointerdown', (event) => {
         if (!event.isPrimary || event.button !== 0 || timeDialState.pointerId !== null) return;
@@ -218,6 +236,7 @@ function initializeTimeDial() {
         timeDialState.pointerId = event.pointerId;
         timeDialState.dragStartX = event.clientX;
         timeDialState.dragStartValue = timeDialState.target;
+        unlockDialSound();
     });
     container.addEventListener('pointermove', (event) => {
         if (event.pointerId !== timeDialState.pointerId) return;
@@ -231,6 +250,7 @@ function initializeTimeDial() {
         const direction = { ArrowRight: 1, ArrowUp: 1, ArrowLeft: -1, ArrowDown: -1 }[event.key];
         if (direction === undefined && event.key !== 'Home' && event.key !== 'End') return;
         event.preventDefault();
+        unlockDialSound();
         const nextValue = event.key === 'Home' ? 0 : event.key === 'End' ? 2
             : timeDialState.target + direction / timeDialConfig.ticksPerMood;
         setTimeDialValue(nextValue);
@@ -238,15 +258,23 @@ function initializeTimeDial() {
     });
     // Native range input remains usable by assistive technology without pointer gestures.
     input.addEventListener('input', () => {
+        unlockDialSound();
         setTimeDialValue(Number(input.value));
         commitTimeDialMood();
     });
+}
+
+function prepareDialSound() {
+    if (!audioState.hasUnlockedAudio) unlockAudioOnInteraction();
+    unlockDialSound();
 }
 
 function setTimeDialValue(value) {
     const tick = Math.max(0, Math.min(timeDialStops.length - 1,
         Math.round(value * timeDialConfig.ticksPerMood)));
     timeDialState.target = timeDialStops[tick].value;
+    if (tick !== timeDialState.lastTick) playDialTick();
+    timeDialState.lastTick = tick;
     timeDialElements.input.value = String(timeDialState.target);
     timeDialElements.input.setAttribute('aria-valuetext', timeDialStops[tick].label);
 }
@@ -302,6 +330,77 @@ function updateSceneTransition(elapsedSeconds) {
 
 function getNightBlend() {
     return Math.max(0, timeDialState.scenePosition - 1);
+}
+
+function unlockDialSound() {
+    if (audioState.isMuted || audioState.volume === 0) return;
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextClass) return;
+    try {
+        if (!timeDialState.audioContext) {
+            const context = new AudioContextClass();
+            timeDialState.audioContext = context;
+            const buffer = context.createBuffer(1, Math.ceil(context.sampleRate * timeDialConfig.tickDuration), context.sampleRate);
+            const samples = buffer.getChannelData(0);
+            for (let index = 0; index < samples.length; index++) {
+                samples[index] = (Math.random() * 2 - 1)
+                    * Math.exp(-index / (samples.length * timeDialConfig.tickDecay));
+            }
+            timeDialState.tickBuffer = buffer;
+        }
+        const hasUserActivation = !navigator.userActivation || navigator.userActivation.isActive;
+        if (timeDialState.audioContext.state === 'suspended' && hasUserActivation
+            && !timeDialState.isResumingAudio) {
+            timeDialState.isResumingAudio = true;
+            timeDialState.audioContext.resume().then(() => {
+                if (timeDialState.hasPendingTick) {
+                    timeDialState.hasPendingTick = false;
+                    playDialTick();
+                }
+            }).catch(() => {}).finally(() => {
+                timeDialState.isResumingAudio = false;
+            });
+        }
+    } catch {
+        // The visual dial still works when browser audio is unavailable.
+    }
+}
+
+function playDialTick() {
+    const context = timeDialState.audioContext;
+    if (!context || !timeDialState.tickBuffer
+        || audioState.isMuted || audioState.volume === 0) return;
+    if (context.state === 'suspended') {
+        timeDialState.hasPendingTick = true;
+        return;
+    }
+    if (context.state !== 'running') return;
+    const now = context.currentTime;
+    if (now - timeDialState.lastTickTime < timeDialConfig.minimumTickInterval) return;
+    timeDialState.lastTickTime = now;
+    const source = context.createBufferSource();
+    const filter = context.createBiquadFilter();
+    const highpass = context.createBiquadFilter();
+    const gain = context.createGain();
+    source.buffer = timeDialState.tickBuffer;
+    filter.type = 'lowpass';
+    filter.frequency.value = timeDialConfig.tickLowpassFrequency;
+    highpass.type = 'highpass';
+    highpass.frequency.value = timeDialConfig.tickHighpassFrequency;
+    gain.gain.value = audioState.volume * timeDialConfig.tickGain;
+    // p5.sound wraps connect(), so connect nodes separately instead of chaining return values.
+    source.connect(highpass);
+    highpass.connect(filter);
+    filter.connect(gain);
+    gain.connect(context.destination);
+    source.onended = () => {
+        source.disconnect();
+        highpass.disconnect();
+        filter.disconnect();
+        gain.disconnect();
+    };
+    source.start(now);
+    source.stop(now + timeDialConfig.tickDuration);
 }
 
 function setup() {
