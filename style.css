@@ -137,6 +137,98 @@ main {
     cursor: pointer;
 }
 
+.time-dial {
+    --dial-offset: 0px;
+    position: fixed;
+    left: calc(16px + env(safe-area-inset-left, 0px));
+    bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+    z-index: 100;
+    width: min(144px, calc(100vw - 32px));
+    height: 44px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 15px;
+    background: rgba(255, 255, 255, 0.08);
+    color: #3e6669;
+    backdrop-filter: blur(10px);
+    cursor: ew-resize;
+    touch-action: none;
+    user-select: none;
+}
+
+.time-dial:focus-within {
+    outline: 2px solid #3e6669;
+    outline-offset: 4px;
+}
+
+.time-dial__window {
+    position: absolute;
+    inset: 0 12px;
+    overflow: hidden;
+    border-radius: inherit;
+    mask-image: linear-gradient(to right, transparent, #000 18%, #000 82%, transparent);
+}
+
+.time-dial__ruler {
+    position: absolute;
+    left: 50%;
+    top: 6px;
+    width: 320px;
+    height: 36px;
+    margin-left: -96px;
+    transform: translateX(var(--dial-offset));
+}
+
+.time-dial__ruler::before,
+.time-dial__ruler::after {
+    content: '';
+    position: absolute;
+    inset: 0 auto auto 96px;
+    width: 129px;
+    height: 8px;
+    background: repeating-linear-gradient(to right, currentColor 0 1px, transparent 1px 32px);
+    opacity: 0.4;
+}
+
+.time-dial__ruler::after {
+    height: 14px;
+    background: repeating-linear-gradient(to right, currentColor 0 1px, transparent 1px 64px);
+    opacity: 0.75;
+}
+
+.time-dial__mood {
+    position: absolute;
+    top: 17px;
+    transform: translateX(-50%);
+    font-size: 14px;
+    line-height: 16px;
+}
+
+.time-dial__mood--day { left: 96px; }
+.time-dial__mood--sunset { left: 160px; }
+.time-dial__mood--night { left: 224px; }
+
+.time-dial__marker {
+    position: absolute;
+    top: 5px;
+    left: calc(50% - 1px);
+    width: 2px;
+    height: 16px;
+    border-radius: 2px;
+    background: #355e61;
+}
+
+#time-control {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    opacity: 0;
+    /* Pointer gestures belong to the ruler; the native range retains keyboard and AT input. */
+    pointer-events: none;
+}
+
+.time-dial:active { cursor: ew-resize; }
+
 @media (prefers-reduced-motion: reduce) {
     .audio-player__icon-button {
         transition: none;
@@ -147,7 +239,8 @@ main {
     .audio-player {
         top: auto;
         right: 16px;
-        bottom: 16px;
+        /* Keep the compact dial in the bottom corner without covering either control. */
+        bottom: calc(84px + env(safe-area-inset-bottom, 0px));
         width: min(260px, calc(100vw - 32px));
     }
 

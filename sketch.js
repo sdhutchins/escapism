@@ -21,7 +21,34 @@ const TIDE_ADVANCE_PORTION = 0.42;
 const TIDE_PEAK_PORTION = 0.18;
 const MAX_SHOOTING_STARS = 6;
 const sceneModes = ['day', 'sunset', 'night'];
+const timeDialStops = [
+    { value: 0, mode: 'day', label: 'Day' },
+    { value: 0.5, mode: 'goldenHour', label: 'Golden hour' },
+    { value: 1, mode: 'sunset', label: 'Orange-pink sunset' },
+    { value: 1.5, mode: 'afterglow', label: 'Afterglow' },
+    { value: 2, mode: 'night', label: 'Night' }
+];
 let sceneModeIndex = 0;
+const timeDialConfig = {
+    pixelsPerMood: 64,
+    ticksPerMood: 2,
+    settlingSeconds: 0.16,
+    colorTransitionSeconds: 2.6,
+};
+// State: the requested mood, its visible position, and one captured gesture.
+const timeDialState = {
+    target: 0,
+    position: 0,
+    scenePosition: 0,
+    transitionFrom: 0,
+    transitionTarget: 0,
+    transitionElapsed: 0,
+    pointerId: null,
+    dragStartX: 0,
+    dragStartValue: 0,
+};
+const reducedMotionPreference = window.matchMedia('(prefers-reduced-motion: reduce)');
+let timeDialElements = null;
 const dayAudioPlaylist = [
     {
         title: 'Daydreaming',
@@ -129,6 +156,31 @@ const colorPalette = {
     nightBoatMast: [122, 126, 155]
 };
 
+// Extra dial stops keep warm light and afterglow distinct during the gradual transition.
+const twilightPalettes = {
+    goldenHour: {
+        skyTop: [221, 197, 161],
+        skyMid: [250, 187, 132],
+        horizon: [255, 178, 99],
+        cloud: [244, 218, 183],
+        waterLight: [157, 177, 182],
+        waterMid: [130, 154, 164],
+        waterDark: [110, 137, 153],
+        sunBody: [255, 225, 163]
+    },
+    afterglow: {
+        skyTop: [154, 157, 165],
+        skyMid: [228, 166, 159],
+        horizon: [251, 166, 125],
+        cloud: [179, 158, 154],
+        waterLight: [124, 144, 153],
+        waterMid: [105, 126, 141],
+        waterDark: [86, 108, 128],
+        sandTop: [175, 164, 157],
+        sandBottom: [165, 155, 150]
+    }
+};
+
 const sailColors = [
     [224, 104, 92],
     [240, 177, 88],
@@ -139,7 +191,118 @@ const sailColors = [
 
 let sailColorIndex = 0;
 
+const scenePalettes = timeDialStops.map((stop) => getSceneColors(stop.mode));
+// Reuse the blended palette across all renderers instead of allocating it per draw call.
+const blendedSceneColors = Object.fromEntries(
+    Object.entries(scenePalettes[0]).map(([name, channels]) => [name, [...channels]])
+);
+
 initializeAudioPlayer();
+initializeTimeDial();
+
+function initializeTimeDial() {
+    timeDialElements = {
+        container: document.getElementById('time-dial'),
+        input: document.getElementById('time-control')
+    };
+    const input = timeDialElements.input;
+    const container = timeDialElements.container;
+    if (!input || !container) return;
+
+    // Input: pointer capture keeps mouse and touch on the same bounded drag path.
+    container.addEventListener('pointerdown', (event) => {
+        if (!event.isPrimary || event.button !== 0 || timeDialState.pointerId !== null) return;
+        event.preventDefault();
+        input.focus({ preventScroll: true });
+        container.setPointerCapture(event.pointerId);
+        timeDialState.pointerId = event.pointerId;
+        timeDialState.dragStartX = event.clientX;
+        timeDialState.dragStartValue = timeDialState.target;
+    });
+    container.addEventListener('pointermove', (event) => {
+        if (event.pointerId !== timeDialState.pointerId) return;
+        const distance = timeDialState.dragStartX - event.clientX;
+        setTimeDialValue(timeDialState.dragStartValue + distance / timeDialConfig.pixelsPerMood);
+    });
+    container.addEventListener('pointerup', finishTimeDialDrag);
+    container.addEventListener('pointercancel', finishTimeDialDrag);
+    container.addEventListener('lostpointercapture', finishTimeDialDrag);
+    input.addEventListener('keydown', (event) => {
+        const direction = { ArrowRight: 1, ArrowUp: 1, ArrowLeft: -1, ArrowDown: -1 }[event.key];
+        if (direction === undefined && event.key !== 'Home' && event.key !== 'End') return;
+        event.preventDefault();
+        const nextValue = event.key === 'Home' ? 0 : event.key === 'End' ? 2
+            : timeDialState.target + direction / timeDialConfig.ticksPerMood;
+        setTimeDialValue(nextValue);
+        commitTimeDialMood();
+    });
+    // Native range input remains usable by assistive technology without pointer gestures.
+    input.addEventListener('input', () => {
+        setTimeDialValue(Number(input.value));
+        commitTimeDialMood();
+    });
+}
+
+function setTimeDialValue(value) {
+    const tick = Math.max(0, Math.min(timeDialStops.length - 1,
+        Math.round(value * timeDialConfig.ticksPerMood)));
+    timeDialState.target = timeDialStops[tick].value;
+    timeDialElements.input.value = String(timeDialState.target);
+    timeDialElements.input.setAttribute('aria-valuetext', timeDialStops[tick].label);
+}
+
+function finishTimeDialDrag(event) {
+    if (event.pointerId !== timeDialState.pointerId) return;
+    timeDialState.pointerId = null;
+    commitTimeDialMood();
+}
+
+function commitTimeDialMood() {
+    sceneModeIndex = Math.round(timeDialState.target);
+    syncPlaylistToSceneMode();
+}
+
+// Update: smooth settling is time-based, so it feels consistent across frame rates.
+function updateTimeDial() {
+    const elapsedSeconds = Math.min(deltaTime / 1000, 0.05);
+    const isDraggingDial = timeDialState.pointerId !== null;
+    const dialBlend = reducedMotionPreference.matches || isDraggingDial ? 1
+        : 1 - Math.exp(-elapsedSeconds / timeDialConfig.settlingSeconds);
+    timeDialState.position += (timeDialState.target - timeDialState.position) * dialBlend;
+    updateSceneTransition(deltaTime / 1000);
+    if (timeDialElements.container) {
+        timeDialElements.container.style.setProperty('--dial-offset',
+            `${-timeDialState.position * timeDialConfig.pixelsPerMood}px`);
+    }
+    const palettePosition = timeDialState.scenePosition * timeDialConfig.ticksPerMood;
+    const earlierMood = Math.min(Math.floor(palettePosition), scenePalettes.length - 2);
+    const blend = palettePosition - earlierMood;
+    for (const name of Object.keys(blendedSceneColors)) {
+        for (let channel = 0; channel < 3; channel++) {
+            const start = scenePalettes[earlierMood][name][channel];
+            blendedSceneColors[name][channel] = start + (scenePalettes[earlierMood + 1][name][channel] - start) * blend;
+        }
+    }
+}
+
+function updateSceneTransition(elapsedSeconds) {
+    if (timeDialState.transitionTarget !== timeDialState.target) {
+        // Retarget from the currently visible light so rapid turns never jump in color.
+        timeDialState.transitionFrom = timeDialState.scenePosition;
+        timeDialState.transitionTarget = timeDialState.target;
+        timeDialState.transitionElapsed = 0;
+    }
+    timeDialState.transitionElapsed += Math.max(0, elapsedSeconds);
+    const progress = reducedMotionPreference.matches ? 1
+        : Math.min(1, timeDialState.transitionElapsed / timeDialConfig.colorTransitionSeconds);
+    const blend = progress * progress * (3 - 2 * progress);
+    timeDialState.scenePosition = timeDialState.transitionFrom
+        + (timeDialState.transitionTarget - timeDialState.transitionFrom) * blend;
+}
+
+function getNightBlend() {
+    return Math.max(0, timeDialState.scenePosition - 1);
+}
 
 function setup() {
     const canvas = createCanvas(windowWidth, windowHeight);
@@ -424,6 +587,7 @@ function updateAudioInterface() {
 }
 
 function draw() {
+    updateTimeDial();
     drawBeachScene();
     drawNightStars();
     updateAndDrawShootingStars();
@@ -454,8 +618,9 @@ function isNightMode() {
 }
 
 function cycleSceneMode() {
-    sceneModeIndex = (sceneModeIndex + 1) % sceneModes.length;
-    syncPlaylistToSceneMode();
+    const currentStop = Math.round(timeDialState.target * timeDialConfig.ticksPerMood);
+    setTimeDialValue(timeDialStops[(currentStop + 1) % timeDialStops.length].value);
+    commitTimeDialMood();
 }
 
 function getActivePlaylist() {
@@ -486,7 +651,15 @@ function syncPlaylistToSceneMode() {
 }
 
 function getActiveSceneColors() {
-    if (isNightMode()) {
+    return blendedSceneColors;
+}
+
+function getSceneColors(mode) {
+    if (twilightPalettes[mode]) {
+        return { ...getSceneColors('sunset'), ...twilightPalettes[mode] };
+    }
+
+    if (mode === 'night') {
         return {
             skyTop: colorPalette.nightTop,
             skyMid: colorPalette.nightMid,
@@ -506,7 +679,7 @@ function getActiveSceneColors() {
         };
     }
 
-    if (isSunsetMode()) {
+    if (mode === 'sunset') {
         return {
             skyTop: colorPalette.sunsetTop,
             skyMid: colorPalette.sunsetBottom,
@@ -594,14 +767,15 @@ function drawBeachScene() {
         rect(0, y1, width, (horizonY - skyHeight) / 15);
     }
 
-    if (isNightMode()) {
-        fill(colorPalette.moonGlow[0], colorPalette.moonGlow[1], colorPalette.moonGlow[2], 35);
+    if (getNightBlend() > 0) {
+        fill(colorPalette.moonGlow[0], colorPalette.moonGlow[1], colorPalette.moonGlow[2], 35 * getNightBlend());
         ellipse(width * 0.5, horizonY + 12, width * 0.58, 54);
     }
 }
 
 function drawNightStars() {
-    if (!isNightMode()) {
+    const nightBlend = getNightBlend();
+    if (nightBlend <= 0) {
         return;
     }
 
@@ -617,7 +791,7 @@ function drawNightStars() {
         }
 
         const twinkle = (sin(frameCount * star.twinkleSpeed + star.twinkleOffset) + 1) * 0.5;
-        const starOpacity = star.opacity + twinkle * 70;
+        const starOpacity = (star.opacity + twinkle * 70) * nightBlend;
         fill(colorPalette.star[0], colorPalette.star[1], colorPalette.star[2], starOpacity);
         circle(star.x, star.y, star.size + twinkle * 0.8);
     }
@@ -723,7 +897,7 @@ function drawClouds() {
     const activeColors = getActiveSceneColors();
     
     noStroke();
-    fill(activeColors.cloud[0], activeColors.cloud[1], activeColors.cloud[2], isNightMode() ? 120 : 200);
+    fill(activeColors.cloud[0], activeColors.cloud[1], activeColors.cloud[2], 200 - 80 * getNightBlend());
     
     for (let i = 0; i < 4; i++) {
         const cloudX = (width * 0.2) + (i * width * 0.25) + sin(time + i * 0.5) * 15;
@@ -1038,7 +1212,7 @@ function checkSunClick(mx, my) {
 
 function drawWaves() {
     const horizonY = height * 0.65;
-    const waveTimeScale = isNightMode() ? 0.012 : 0.02;
+    const waveTimeScale = 0.02 - 0.008 * getNightBlend();
     const time = frameCount * waveTimeScale;
     const activeColors = getActiveSceneColors();
     const waterLight = activeColors.waterLight;
@@ -1356,7 +1530,8 @@ function createSandMark(startX, startY, endX, endY) {
     });
 }
 
-function mousePressed() {
+function mousePressed(event) {
+    if (event?.target?.closest('.time-dial')) return;
     const clickedSailboat = checkSailboatClick(mouseX, mouseY);
     const clickedSun = checkSunClick(mouseX, mouseY);
     const clickedNightStar = checkNightStarClick(mouseX, mouseY);
@@ -1405,7 +1580,8 @@ function mouseReleased() {
     isDragging = false;
 }
 
-function touchStarted() {
+function touchStarted(event) {
+    if (event?.target?.closest('.time-dial')) return true;
     const clickedSailboat = checkSailboatClick(mouseX, mouseY);
     const clickedSun = checkSunClick(mouseX, mouseY);
     const clickedNightStar = checkNightStarClick(mouseX, mouseY);
@@ -1436,7 +1612,8 @@ function touchStarted() {
     return false;
 }
 
-function touchMoved() {
+function touchMoved(event) {
+    if (event?.target?.closest('.time-dial')) return true;
     if (isDragging) {
         const distance = dist(mouseX, mouseY, lastMouseX, lastMouseY);
         if (distance > 8) {
@@ -1452,7 +1629,8 @@ function touchMoved() {
     return false;
 }
 
-function touchEnded() {
+function touchEnded(event) {
+    if (event?.target?.closest('.time-dial')) return true;
     isDragging = false;
     return false;
 }
