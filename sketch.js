@@ -41,6 +41,24 @@ const timeDialConfig = {
     tickHighpassFrequency: 1100,
     tickGain: 0.6
 };
+const sunsetConfig = {
+    sunXRatio: 0.52,
+    sunSize: 28,
+    horizonOffset: 30,
+    sunHeightAboveHorizon: 8,
+    sunSinkDistance: 88,
+    skyMidpointRatio: 0.4
+};
+const moonConfig = {
+    x: 120,
+    y: 120,
+    radius: 26.5,
+    innerArcRadius: 25,
+    innerArcOffset: 14,
+    glowBlur: 12,
+    glowOpacity: 0.28
+};
+const moonCrescentPath = createMoonCrescentPath();
 // State: the requested mood, its visible position, and one captured gesture.
 const timeDialState = {
     target: 0,
@@ -697,10 +715,10 @@ function draw() {
     drawBeachScene();
     drawNightStars();
     updateAndDrawShootingStars();
+    drawSun();
     drawClouds();
     drawWaves();
     drawSailboat();
-    drawSun();
     drawSand();
     updateAndDrawTideWash();
     updateAndDrawSandMarks();
@@ -846,7 +864,7 @@ function createNightStar() {
 }
 
 function drawBeachScene() {
-    const skyHeight = height * 0.6;
+    const skyHeight = height * lerp(0.6, sunsetConfig.skyMidpointRatio, getSunsetBlend());
     const horizonY = height * 0.65;
     const activeColors = getActiveSceneColors();
     
@@ -1287,58 +1305,79 @@ function getSunsetBlend() {
     return Math.max(0, 1 - Math.abs(timeDialState.scenePosition - 1));
 }
 
+function getSunState() {
+    const dayProgress = Math.min(1, timeDialState.scenePosition);
+    const descent = dayProgress * dayProgress * (3 - 2 * dayProgress);
+    const horizonY = height * 0.65 - sunsetConfig.horizonOffset;
+    return {
+        x: lerp(120, width * sunsetConfig.sunXRatio, descent),
+        y: lerp(120, horizonY - sunsetConfig.sunHeightAboveHorizon, descent)
+            + getNightBlend() * sunsetConfig.sunSinkDistance,
+        size: lerp(80, sunsetConfig.sunSize, descent),
+        rayOpacity: (1 - dayProgress) ** 2,
+        horizonY
+    };
+}
+
 function drawSun() {
-    const sunX = 120;
-    const sunY = 120;
-    const sunSize = 80;
-    const rayLength = 40;
-    const numRays = 16;
+    const sun = getSunState();
+    const nightBlend = getNightBlend();
     const activeColors = getActiveSceneColors();
-    const rayRotationSpeed = isSunsetMode() ? 0.004 : 0.01;
-    
+
     push();
-    translate(sunX, sunY);
-
-    if (isNightMode()) {
-        noStroke();
-        fill(colorPalette.moonGlow[0], colorPalette.moonGlow[1], colorPalette.moonGlow[2], 55);
-        ellipse(-4, 2, sunSize * 0.68, sunSize * 0.68);
-
-        fill(activeColors.sunBody[0], activeColors.sunBody[1], activeColors.sunBody[2]);
-        ellipse(0, 0, sunSize * 0.66, sunSize * 0.66);
-
-        fill(colorPalette.nightTop[0], colorPalette.nightTop[1], colorPalette.nightTop[2], 255);
-        ellipse(sunSize * 0.17, 0, sunSize * 0.62, sunSize * 0.62);
-    } else {
-        rotate(frameCount * rayRotationSpeed);
-        noStroke();
-
-        for (let i = 0; i < numRays; i++) {
-            const angle = (TWO_PI / numRays) * i;
-            const x1 = cos(angle) * (sunSize / 2 + 10);
-            const y1 = sin(angle) * (sunSize / 2 + 10);
-            const x2 = cos(angle) * (sunSize / 2 + rayLength);
-            const y2 = sin(angle) * (sunSize / 2 + rayLength);
-            
-            stroke(activeColors.sunRays[0], activeColors.sunRays[1], activeColors.sunRays[2], 200);
+    translate(sun.x, sun.y);
+    noStroke();
+    if (nightBlend < 1) {
+        // The waves render afterward, naturally hiding the descending sun at the horizon.
+        fill(activeColors.sunBody[0], activeColors.sunBody[1], activeColors.sunBody[2], 255 * (1 - nightBlend));
+        circle(0, 0, sun.size);
+        if (sun.rayOpacity > 0.001) {
+            rotate(frameCount * 0.01);
+            stroke(activeColors.sunRays[0], activeColors.sunRays[1], activeColors.sunRays[2], 200 * sun.rayOpacity);
             strokeWeight(4);
-            line(x1, y1, x2, y2);
+            for (let ray = 0; ray < 16; ray++) {
+                const angle = TWO_PI * ray / 16;
+                line(cos(angle) * (sun.size / 2 + 10), sin(angle) * (sun.size / 2 + 10),
+                    cos(angle) * (sun.size / 2 + 40), sin(angle) * (sun.size / 2 + 40));
+            }
         }
-
-        fill(activeColors.sunBody[0], activeColors.sunBody[1], activeColors.sunBody[2]);
-        noStroke();
-        ellipse(0, 0, sunSize, sunSize);
     }
-
     pop();
+
+    if (nightBlend > 0) drawMoon(nightBlend);
+}
+
+function createMoonCrescentPath() {
+    const { radius, innerArcRadius, innerArcOffset } = moonConfig;
+    const tipX = (radius ** 2 - innerArcRadius ** 2 + innerArcOffset ** 2) / (2 * innerArcOffset);
+    const tipY = Math.sqrt(radius ** 2 - tipX ** 2);
+    const outerAngle = Math.atan2(tipY, tipX);
+    const innerAngle = Math.atan2(tipY, tipX - innerArcOffset);
+    const crescent = new Path2D();
+    // Join the arcs at their intersections, leaving the rest of the sky untouched.
+    crescent.arc(0, 0, radius, -outerAngle, outerAngle, true);
+    crescent.arc(innerArcOffset, 0, innerArcRadius, innerAngle, -innerAngle, false);
+    crescent.closePath();
+    return crescent;
+}
+
+function drawMoon(opacity) {
+    drawingContext.save();
+    drawingContext.translate(moonConfig.x, moonConfig.y);
+    drawingContext.globalAlpha *= opacity;
+    drawingContext.fillStyle = `rgb(${colorPalette.moon.join(',')})`;
+    drawingContext.shadowColor = `rgba(${colorPalette.moonGlow.join(',')}, ${moonConfig.glowOpacity})`;
+    drawingContext.shadowBlur = moonConfig.glowBlur;
+    drawingContext.fill(moonCrescentPath);
+    drawingContext.restore();
 }
 
 function checkSunClick(mx, my) {
-    const sunX = 120;
-    const sunY = 120;
-    const sunSize = 80;
-    const distance = dist(mx, my, sunX, sunY);
-    return distance < sunSize / 2 + 40;
+    const sun = getSunState();
+    const clickedSun = getNightBlend() < 0.85
+        && dist(mx, my, sun.x, sun.y) < sun.size / 2 + 20;
+    const clickedMoon = getNightBlend() > 0.15 && dist(mx, my, moonConfig.x, moonConfig.y) < 53;
+    return clickedSun || clickedMoon;
 }
 
 function drawWaves() {
