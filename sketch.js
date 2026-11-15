@@ -1431,7 +1431,18 @@ function drawWaves() {
     const waterLight = activeColors.waterLight;
     const waterMid = activeColors.waterMid;
     const waterDark = activeColors.waterDark;
-    
+
+    // The distant ocean starts at one level horizon; curved waves belong closer to shore.
+    const surfaceY = horizonY - sunsetConfig.horizonOffset;
+    const oceanGradient = drawingContext.createLinearGradient(0, surfaceY, 0, horizonY + 100);
+    oceanGradient.addColorStop(0, `rgb(${waterDark.join(',')})`);
+    oceanGradient.addColorStop(0.55, `rgb(${waterMid.join(',')})`);
+    oceanGradient.addColorStop(1, `rgb(${waterLight.join(',')})`);
+    drawingContext.save();
+    drawingContext.fillStyle = oceanGradient;
+    drawingContext.fillRect(0, surfaceY, width, height - surfaceY);
+    drawingContext.restore();
+
     noStroke();
     
     for (let i = 0; i < 5; i++) {
@@ -1459,15 +1470,6 @@ function drawWaves() {
         endShape(CLOSE);
     }
     
-    noStroke();
-    fill(waterLight[0], waterLight[1], waterLight[2], 180);
-    ellipse(width * 0.5, horizonY + 50 + sin(time) * 5, width * 1.4, 130);
-    
-    fill(waterMid[0], waterMid[1], waterMid[2], 160);
-    ellipse(width * 0.5, horizonY + 30 + sin(time * 0.8) * 4, width * 1.2, 110);
-    
-    fill(waterDark[0], waterDark[1], waterDark[2], 140);
-    ellipse(width * 0.5, horizonY + 15 + sin(time * 0.6) * 3, width * 1.0, 90);
 }
 
 function drawSand() {
