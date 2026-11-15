@@ -47,6 +47,7 @@ const sunsetConfig = {
     horizonOffset: 30,
     sunHeightAboveHorizon: 8,
     sunSinkDistance: 88,
+    glowRadiusRatio: 0.38,
     skyMidpointRatio: 0.4
 };
 const moonConfig = {
@@ -1323,6 +1324,7 @@ function drawSun() {
     const sun = getSunState();
     const nightBlend = getNightBlend();
     const activeColors = getActiveSceneColors();
+    drawSunsetGlow(sun);
 
     push();
     translate(sun.x, sun.y);
@@ -1345,6 +1347,21 @@ function drawSun() {
     pop();
 
     if (nightBlend > 0) drawMoon(nightBlend);
+}
+
+function drawSunsetGlow(sun) {
+    const strength = getSunsetBlend();
+    if (strength < 0.001) return;
+    const radius = Math.min(width * sunsetConfig.glowRadiusRatio, height * 0.48);
+    const glow = drawingContext.createRadialGradient(sun.x, sun.y, sun.size * 0.25,
+        sun.x, sun.y, Math.max(radius, sun.size));
+    glow.addColorStop(0, `rgba(255, 217, 156, ${0.48 * strength})`);
+    glow.addColorStop(0.35, `rgba(255, 180, 133, ${0.18 * strength})`);
+    glow.addColorStop(1, 'rgba(255, 180, 133, 0)');
+    drawingContext.save();
+    drawingContext.fillStyle = glow;
+    drawingContext.fillRect(0, 0, width, height * 0.65);
+    drawingContext.restore();
 }
 
 function createMoonCrescentPath() {
