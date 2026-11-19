@@ -1113,6 +1113,8 @@ function initializeCloudControls(canvas) {
         button.addEventListener('blur', () => { cloudHintState.focusedIndex = null; });
     }
     cloudControls.toggle.addEventListener('click', () => {
+        prepareDialSound();
+        playDialTick();
         setCloudStyleValue(1 - cloudStyleState.target);
     });
     cloudControls.panel.addEventListener('keydown', (event) => {
@@ -1177,6 +1179,7 @@ function beginCloudGesture(event, canvas) {
     const cloud = checkCloudClick(point.x, point.y);
     if (!isFeatureCloud(cloud) || checkSunClick(point.x, point.y) || checkSailboatClick(point.x, point.y)) return;
     event.preventDefault();
+    if (cloud.index === cloudControlConfig.styleCloudIndex) prepareDialSound();
     // Pointer capture suppresses normal focus changes; leave the previous control without focusing the canvas.
     document.activeElement?.blur?.();
     canvas.setPointerCapture(event.pointerId);
@@ -1213,6 +1216,8 @@ function activateCloudFeature(index, focusToggle = false) {
     const cloud = getCloudPositions()[index];
     if (index === cloudControlConfig.rainCloudIndex) startRain(cloud.x, cloud.y);
     if (index === cloudControlConfig.styleCloudIndex) {
+        prepareDialSound();
+        playDialTick();
         setCloudPanelOpen(!cloudFlipState.open, focusToggle);
     }
 }
