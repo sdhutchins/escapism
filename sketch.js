@@ -1648,7 +1648,9 @@ function softenSandMarksForTideWash(washFrontY) {
 }
 
 function updateAndDrawParticles() {
-    const particleOpacityScale = isNightMode() ? 1.75 : 1;
+    // Fade with the evening sky; the first three dial scenes have no drifting specks.
+    const particleOpacityScale = getNightBlend() * 1.75;
+    if (particleOpacityScale <= 0) return;
 
     for (let particle of particles) {
         particle.y += particle.speed;
