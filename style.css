@@ -145,7 +145,7 @@ main {
     z-index: 100;
     width: min(144px, calc(100vw - 32px));
     height: 44px;
-    border: 1px solid rgba(255, 255, 255, 0.14);
+    border: 1px solid rgba(62, 102, 105, 0.24);
     border-radius: 15px;
     background: rgba(255, 255, 255, 0.08);
     color: #3e6669;
