@@ -64,6 +64,40 @@ const moonConfig = {
     glowOpacity: 0.28
 };
 const moonCrescentPath = createMoonCrescentPath();
+const cloudAppearance = {
+    color: [232, 233, 232],
+    highlight: [246, 247, 246],
+    underside: [211, 214, 215],
+    opacity: 255 * 0.75,
+    edgeSoftness: 3,
+    edgeOpacity: 0.24,
+    padding: 8,
+    count: 4,
+    baseSize: 80,
+    sizeStep: 15
+};
+const cloudStyles = [
+    {
+        label: 'Soft',
+        lobes: [[0, 0, 0.5, 0.3], [0.4, 0, 0.35, 0.25], [-0.3, 0, 0.3, 0.25],
+            [0.2, -0.15, 0.25, 0.2], [-0.2, -0.1, 0.25, 0.2]],
+        shadows: []
+    },
+    {
+        label: 'Natural',
+        lobes: [[-0.22, 0.02, 0.36, 0.26], [0.14, 0.02, 0.41, 0.25],
+            [0.47, 0.02, 0.27, 0.21], [-0.4, 0.02, 0.2, 0.18],
+            [-0.3, -0.16, 0.21, 0.22], [-0.05, -0.2, 0.23, 0.25],
+            [0.2, -0.18, 0.19, 0.22], [0.43, -0.12, 0.17, 0.18],
+            [-0.48, -0.1, 0.13, 0.15], [0.62, 0.04, 0.13, 0.13]],
+        shadows: [[-0.3, 0.1, 0.25, 0.12], [0.18, 0.12, 0.3, 0.1],
+            [0.45, 0.07, 0.2, 0.07]]
+    }
+];
+const cloudPaths = cloudStyles.map((style) => createCloudSilhouettePath(style.lobes));
+const cloudSprites = [];
+const cloudBlendSprites = [];
+const cloudStyleState = { target: 0, blend: 0 };
 // State: the requested mood, its visible position, and one captured gesture.
 const timeDialState = {
     target: 0,
@@ -167,8 +201,6 @@ const colorPalette = {
     sunsetSun: [255, 234, 166],
     sunsetSunRays: [233, 96, 52],
     sunsetCloud: [223, 187, 163],
-    sunsetCloudShadow: [165, 148, 139],
-    sunsetCloudHighlight: [255, 187, 143],
     sunsetWaterLight: [153, 163, 166],
     sunsetWaterMid: [129, 145, 153],
     sunsetWaterDark: [106, 126, 140],
@@ -438,6 +470,7 @@ function setup() {
     canvas.parent('canvas-container');
     
     colorMode(RGB, 255);
+    initializeCloudSprites();
     initializeNightStars();
     
     for (let i = 0; i < 15; i++) {
@@ -1022,62 +1055,121 @@ function createShootingStar(star) {
     });
 }
 
-function drawClouds() {
-    const time = frameCount * 0.003;
-    const activeColors = getActiveSceneColors();
-    
-    noStroke();
-    fill(activeColors.cloud[0], activeColors.cloud[1], activeColors.cloud[2], 200 - 80 * getNightBlend());
-    
-    for (let i = 0; i < 4; i++) {
-        const cloudX = (width * 0.2) + (i * width * 0.25) + sin(time + i * 0.5) * 15;
-        const cloudY = height * 0.25 + i * 50;
-        const cloudSize = 80 + i * 15;
-        
-        push();
-        translate(cloudX, cloudY);
-        shadeSunsetCloud(cloudSize, activeColors.cloud);
-        
-        ellipse(0, 0, cloudSize, cloudSize * 0.6);
-        ellipse(cloudSize * 0.4, 0, cloudSize * 0.7, cloudSize * 0.5);
-        ellipse(-cloudSize * 0.3, 0, cloudSize * 0.6, cloudSize * 0.5);
-        ellipse(cloudSize * 0.2, -cloudSize * 0.15, cloudSize * 0.5, cloudSize * 0.4);
-        ellipse(-cloudSize * 0.2, -cloudSize * 0.1, cloudSize * 0.5, cloudSize * 0.4);
-        
-        pop();
+function createCloudSilhouettePath(lobes) {
+    const silhouette = new Path2D();
+    for (const [x, y, radiusX, radiusY] of lobes) {
+        silhouette.moveTo(x + radiusX, y);
+        silhouette.ellipse(x, y, radiusX, radiusY, 0, 0, Math.PI * 2);
+        silhouette.closePath();
+    }
+    return silhouette;
+}
+
+function initializeCloudSprites() {
+    for (const sprite of [...cloudSprites.flat(), ...cloudBlendSprites]) sprite.graphic.remove();
+    cloudSprites.length = 0;
+    cloudBlendSprites.length = 0;
+    const lobes = cloudStyles.flatMap((style) => style.lobes);
+    const bounds = {
+        left: Math.min(...lobes.map(([x, y, radiusX]) => x - radiusX)),
+        right: Math.max(...lobes.map(([x, y, radiusX]) => x + radiusX)),
+        top: Math.min(...lobes.map(([x, y, radiusX, radiusY]) => y - radiusY)),
+        bottom: Math.max(...lobes.map(([x, y, radiusX, radiusY]) => y + radiusY))
+    };
+    // Both styles share bounds so their cached images align during a gentle crossfade.
+    for (let style = 0; style < cloudStyles.length; style++) {
+        const sprites = [];
+        for (let index = 0; index < cloudAppearance.count; index++) {
+            const size = cloudAppearance.baseSize + index * cloudAppearance.sizeStep;
+            const sprite = createCloudSprite(size, bounds);
+            paintCloudStyle(sprite, size, bounds, style);
+            sprites.push(sprite);
+            if (style === 0) cloudBlendSprites.push(createCloudSprite(size, bounds));
+        }
+        cloudSprites.push(sprites);
+    }
+    blendCloudSprites();
+}
+
+function createCloudSprite(size, bounds) {
+    const padding = cloudAppearance.padding;
+    const graphic = createGraphics(Math.ceil((bounds.right - bounds.left) * size + padding * 2),
+        Math.ceil((bounds.bottom - bounds.top) * size + padding * 2));
+    graphic.pixelDensity(1);
+    return { graphic, offsetX: bounds.left * size - padding, offsetY: bounds.top * size - padding };
+}
+
+function paintCloudStyle(sprite, size, bounds, styleIndex) {
+    const context = sprite.graphic.drawingContext;
+    const style = cloudStyles[styleIndex];
+    const path = cloudPaths[styleIndex];
+    context.save();
+    context.translate(-sprite.offsetX, -sprite.offsetY);
+    context.scale(size, size);
+    const top = Math.min(...style.lobes.map(([x, y, radiusX, radiusY]) => y - radiusY));
+    const bottom = Math.max(...style.lobes.map(([x, y, radiusX, radiusY]) => y + radiusY));
+    const shading = context.createLinearGradient(0, top, 0, bottom);
+    shading.addColorStop(0, `rgb(${cloudAppearance.highlight.join(',')})`);
+    shading.addColorStop(0.55, `rgb(${cloudAppearance.color.join(',')})`);
+    shading.addColorStop(1, `rgb(${cloudAppearance.underside.join(',')})`);
+    context.fillStyle = shading;
+    context.shadowBlur = cloudAppearance.edgeSoftness;
+    context.shadowColor = `rgba(${cloudAppearance.color.join(',')}, ${cloudAppearance.edgeOpacity})`;
+    context.fill(path);
+    context.clip(path);
+    context.shadowBlur = 0;
+    context.globalCompositeOperation = 'source-atop';
+    // Neutral shadow pockets give the reference-inspired puffs depth without separate circle edges.
+    for (const [x, y, radius, opacity] of style.shadows) {
+        const pocket = context.createRadialGradient(x, y, 0, x, y, radius);
+        pocket.addColorStop(0, `rgba(142, 149, 154, ${opacity})`);
+        pocket.addColorStop(1, 'rgba(142, 149, 154, 0)');
+        context.fillStyle = pocket;
+        context.fillRect(bounds.left, bounds.top, bounds.right - bounds.left, bounds.bottom - bounds.top);
+    }
+    context.restore();
+}
+
+function blendCloudSprites() {
+    for (let index = 0; index < cloudAppearance.count; index++) {
+        const context = cloudBlendSprites[index].graphic.drawingContext;
+        context.save();
+        context.clearRect(0, 0, context.canvas.width, context.canvas.height);
+        context.globalAlpha = 1 - cloudStyleState.blend;
+        context.drawImage(cloudSprites[0][index].graphic.canvas, 0, 0);
+        // Add premultiplied colors so the clouds retain their opacity through the crossfade.
+        context.globalCompositeOperation = 'lighter';
+        context.globalAlpha = cloudStyleState.blend;
+        context.drawImage(cloudSprites[1][index].graphic.canvas, 0, 0);
+        context.restore();
     }
 }
 
-function shadeSunsetCloud(cloudSize, cloudColor) {
-    const sunsetBlend = getSunsetBlend();
-    if (sunsetBlend <= 0.001) return;
-    const cloudOpacity = (200 - 80 * getNightBlend()) / 255;
-    const gradient = drawingContext.createLinearGradient(0, -cloudSize * 0.4, 0, cloudSize * 0.25);
-    const shadow = colorPalette.sunsetCloudShadow;
-    const highlight = colorPalette.sunsetCloudHighlight;
-    // Low sunlight warms the underside while the cloud tops stay in cool shadow.
-    gradient.addColorStop(0, blendCloudLight(cloudColor, shadow, sunsetBlend, cloudOpacity));
-    gradient.addColorStop(1, blendCloudLight(cloudColor, highlight, sunsetBlend, cloudOpacity));
-    drawingContext.fillStyle = gradient;
-}
-
-function blendCloudLight(cloudColor, lightColor, amount, opacity) {
-    const red = lerp(cloudColor[0], lightColor[0], amount);
-    const green = lerp(cloudColor[1], lightColor[1], amount);
-    const blue = lerp(cloudColor[2], lightColor[2], amount);
-    return `rgba(${red}, ${green}, ${blue}, ${opacity})`;
+function drawClouds() {
+    const clouds = getCloudPositions();
+    drawingContext.save();
+    drawingContext.globalAlpha *= cloudAppearance.opacity / 255;
+    for (const cloud of clouds) {
+        const sprite = cloudBlendSprites[cloud.index];
+        drawingContext.save();
+        drawingContext.translate(cloud.x, cloud.y);
+        drawingContext.drawImage(sprite.graphic.canvas, sprite.offsetX, sprite.offsetY);
+        drawingContext.restore();
+    }
+    drawingContext.restore();
 }
 
 function getCloudPositions() {
     const time = frameCount * 0.003;
     const clouds = [];
     
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < cloudAppearance.count; i++) {
         const cloudX = (width * 0.2) + (i * width * 0.25) + sin(time + i * 0.5) * 15;
         const cloudY = height * 0.25 + i * 50;
-        const cloudSize = 80 + i * 15;
+        const cloudSize = cloudAppearance.baseSize + i * cloudAppearance.sizeStep;
         
         clouds.push({
+            index: i,
             x: cloudX,
             y: cloudY,
             size: cloudSize
