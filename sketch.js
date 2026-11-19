@@ -22,9 +22,15 @@ const TIDE_PEAK_PORTION = 0.18;
 const MAX_SHOOTING_STARS = 6;
 const sharkFinConfig = {
     size: 26,
+    speed: 36,
+    maximumFins: 6,
+    lifetimeSeconds: 45,
+    bobAmplitude: 0.4,
+    bobFrequency: 0.65,
     waterlineOffset: 8,
     shorelineMargin: 3,
     minimumWaterDepth: 8,
+    offscreenMargin: 64,
 };
 const sceneModes = ['day', 'sunset', 'night'];
 const timeDialStops = [
@@ -1584,34 +1590,40 @@ function createSharkFin(x, y) {
     const waterline = Math.min(water.shorelineY - sharkFinConfig.shorelineMargin,
         Math.max(water.surfaceY + size + 1, y + sharkFinConfig.waterlineOffset));
     const direction = x < width / 2 ? 1 : -1;
+    if (sharkFins.length >= sharkFinConfig.maximumFins) sharkFins.shift();
     sharkFins.push({
-        x: x,
+        x,
         y: waterline,
-        direction: direction,
-        speed: direction * 1.6,
+        baseY: waterline,
+        direction,
         angle: 0,
+        speed: direction * sharkFinConfig.speed,
         size,
+        age: 0,
+        phase: random(TWO_PI),
     });
 }
 
 function updateAndDrawSharkFins() {
-    for (let i = sharkFins.length - 1; i >= 0; i--) {
-        const fin = sharkFins[i];
-        fin.x += fin.speed;
+    const elapsedSeconds = Math.min(deltaTime / 1000, 0.05);
+    for (let index = sharkFins.length - 1; index >= 0; index--) {
+        const fin = sharkFins[index];
+        fin.x += fin.speed * elapsedSeconds;
+        fin.age += elapsedSeconds;
         fin.angle += 0.05;
-        
-        if (fin.x < -50 || fin.x > width + 50) {
-            sharkFins.splice(i, 1);
+        const water = getOpenWaterBounds(fin.x);
+        fin.y = Math.min(fin.baseY, water.shorelineY - sharkFinConfig.shorelineMargin)
+            + sin(fin.age * sharkFinConfig.bobFrequency + fin.phase) * sharkFinConfig.bobAmplitude;
+        if (fin.x < -sharkFinConfig.offscreenMargin || fin.x > width + sharkFinConfig.offscreenMargin
+            || fin.age >= sharkFinConfig.lifetimeSeconds) {
+            sharkFins.splice(index, 1);
             continue;
         }
-        
         drawSharkFin(fin.x, fin.y, fin.direction, fin.angle, fin.size);
-        
         if (frameCount % 10 === 0) {
             createFinRipples(fin.x, fin.y);
         }
     }
-    
     updateAndDrawFinRipples();
 }
 
