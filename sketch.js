@@ -38,6 +38,12 @@ const sharkFinConfig = {
     reflectionScale: 0.45,
     reflectionBands: 5,
     reflectionOpacity: 0.15,
+    maximumWakeRipples: 60,
+    wakeIntervalSeconds: 0.25,
+    wakeLifetimeSeconds: 1.8,
+    wakeDrift: 6,
+    wakeSpread: 12,
+    wakeFade: 44,
     palette: {
         day: { body: [46, 53, 60], highlight: [69, 78, 85], trailing: [35, 42, 49] },
         night: { body: [30, 39, 52], highlight: [55, 68, 83], trailing: [25, 33, 46] }
@@ -1627,6 +1633,7 @@ function createSharkFin(x, y) {
         size,
         age: 0,
         phase: random(TWO_PI),
+        wakeElapsed: 0
     });
 }
 
@@ -1651,11 +1658,13 @@ function updateAndDrawSharkFins() {
             continue;
         }
         drawSharkFin(fin);
-        if (frameCount % 10 === 0) {
-            createFinRipples(fin.x, fin.y);
+        fin.wakeElapsed += elapsedSeconds;
+        if (fin.wakeElapsed >= sharkFinConfig.wakeIntervalSeconds) {
+            createFinRipples(fin);
+            fin.wakeElapsed %= sharkFinConfig.wakeIntervalSeconds;
         }
     }
-    updateAndDrawFinRipples();
+    updateAndDrawFinRipples(elapsedSeconds);
 }
 
 function getFinColor(name, opacity = 1) {
@@ -1671,6 +1680,7 @@ function drawSharkFin(fin) {
     drawingContext.translate(fin.x, fin.y);
     drawFinReflection(fin, visibility);
     drawFinSilhouette(fin, visibility);
+    drawFinWaterline(fin, visibility);
     drawingContext.restore();
 }
 
@@ -1715,6 +1725,24 @@ function drawFinReflection(fin, visibility) {
         context.fill(sharkFinPaths.silhouette);
         context.restore();
     }
+    context.restore();
+}
+
+function drawFinWaterline(fin, visibility) {
+    const context = drawingContext;
+    const foam = getActiveSceneColors().foam;
+    context.save();
+    context.scale(fin.direction, 1);
+    context.strokeStyle = `rgba(${foam.join(',')}, ${0.42 * visibility})`;
+    context.lineWidth = 1;
+    context.beginPath();
+    context.moveTo(-fin.size * 0.68, 1.2);
+    context.quadraticCurveTo(0, 0.2, fin.size * 0.9, 1);
+    context.stroke();
+    context.beginPath();
+    context.moveTo(fin.size * 0.84, 1.1);
+    context.quadraticCurveTo(fin.size * 1.1, -0.7, fin.size * 1.3, 2.2);
+    context.stroke();
     context.restore();
 }
 
@@ -2120,42 +2148,46 @@ function updateAndDrawParticles() {
     }
 }
 
-function createFinRipples(finX, finY) {
-    if (finRipples.length > 60) {
-        finRipples.shift();
-    }
-
+function createFinRipples(fin) {
+    if (finRipples.length >= sharkFinConfig.maximumWakeRipples) finRipples.shift();
     finRipples.push({
-        x: finX,
-        y: finY + 6,
-        width: random(18, 28),
-        height: random(3, 6),
-        driftX: random(-0.15, 0.15),
-        driftY: random(0.04, 0.12),
-        stretchSpeed: random(0.35, 0.55),
-        fadeSpeed: random(2.4, 3.2),
-        opacity: random(70, 110)
+        x: fin.x - fin.direction * fin.size * 0.55,
+        y: fin.y + 2,
+        direction: fin.direction,
+        width: random(18, 26),
+        height: random(3, 5),
+        age: 0,
+        opacity: random(65, 85) * getFinVisibility(fin)
     });
 }
 
-function updateAndDrawFinRipples() {
-    for (let i = finRipples.length - 1; i >= 0; i--) {
-        const ripple = finRipples[i];
-        ripple.x += ripple.driftX;
-        ripple.y += ripple.driftY;
-        ripple.width += ripple.stretchSpeed;
-        ripple.height += 0.05;
-        ripple.opacity -= ripple.fadeSpeed;
-        
-        if (ripple.opacity <= 0 || ripple.width > 56) {
-            finRipples.splice(i, 1);
+function updateAndDrawFinRipples(elapsedSeconds) {
+    const foam = getActiveSceneColors().foam;
+    for (let index = finRipples.length - 1; index >= 0; index--) {
+        const ripple = finRipples[index];
+        ripple.age += elapsedSeconds;
+        ripple.x -= ripple.direction * sharkFinConfig.wakeDrift * elapsedSeconds;
+        ripple.y += elapsedSeconds * 0.7;
+        ripple.width += sharkFinConfig.wakeSpread * elapsedSeconds;
+        ripple.opacity -= sharkFinConfig.wakeFade * elapsedSeconds;
+        if (ripple.opacity <= 0 || ripple.age >= sharkFinConfig.wakeLifetimeSeconds) {
+            finRipples.splice(index, 1);
             continue;
         }
-        
+        push();
+        translate(ripple.x, ripple.y);
+        scale(-ripple.direction, 1);
         noFill();
-        stroke(236, 245, 248, ripple.opacity);
-        strokeWeight(1.1);
-        arc(ripple.x, ripple.y, ripple.width, ripple.height, PI + QUARTER_PI * 0.2, TWO_PI - QUARTER_PI * 0.2);
+        stroke(foam[0], foam[1], foam[2], ripple.opacity);
+        strokeWeight(1);
+        for (const side of [-1, 1]) {
+            beginShape();
+            vertex(0, 0);
+            quadraticVertex(ripple.width * 0.3, side * ripple.height * 0.4,
+                ripple.width * 0.7, side * ripple.height * 0.7);
+            endShape();
+        }
+        pop();
     }
 }
 
