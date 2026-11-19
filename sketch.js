@@ -1609,6 +1609,12 @@ function drawSandTexture() {
 }
 
 function updateAndDrawSandMarks() {
+    const sandColor = getActiveSceneColors().sandBottom;
+    // Keep each groove darker than the sand while its individual tint and fade remain intact.
+    const redShift = sandColor[0] - colorPalette.sandBottom[0];
+    const greenShift = sandColor[1] - colorPalette.sandBottom[1];
+    const blueShift = sandColor[2] - colorPalette.sandBottom[2];
+
     for (let i = sandMarks.length - 1; i >= 0; i--) {
         const sandMark = sandMarks[i];
         sandMark.opacity -= sandMark.fadeSpeed;
@@ -1618,7 +1624,8 @@ function updateAndDrawSandMarks() {
             continue;
         }
 
-        stroke(sandMark.red, sandMark.green, sandMark.blue, sandMark.opacity);
+        stroke(sandMark.red + redShift, sandMark.green + greenShift,
+            sandMark.blue + blueShift, sandMark.opacity);
         strokeWeight(sandMark.width);
         strokeCap(ROUND);
         line(sandMark.x1, sandMark.y1, sandMark.x2, sandMark.y2);
