@@ -20,6 +20,12 @@ const TIDE_CYCLE_DURATION = 60000;
 const TIDE_ADVANCE_PORTION = 0.42;
 const TIDE_PEAK_PORTION = 0.18;
 const MAX_SHOOTING_STARS = 6;
+const sharkFinConfig = {
+    size: 26,
+    waterlineOffset: 8,
+    shorelineMargin: 3,
+    minimumWaterDepth: 8,
+};
 const sceneModes = ['day', 'sunset', 'night'];
 const timeDialStops = [
     { value: 0, mode: 'day', label: 'Day' },
@@ -797,11 +803,11 @@ function draw() {
     drawWaves();
     drawSunsetReflection();
     drawSailboat();
+    updateAndDrawSharkFins();
     drawSand();
     updateAndDrawTideWash();
     updateAndDrawSandMarks();
     updateAndDrawRain();
-    updateAndDrawSharkFins();
     updateAndDrawParticles();
     updateAndDrawRipples();
     drawSandTexture();
@@ -1485,9 +1491,20 @@ function startRain(cloudX, cloudY) {
     rainDroplets = [];
 }
 
-function checkWaterClick(mx, my) {
+function getOpenWaterBounds(x) {
     const horizonY = height * 0.65;
-    return my >= horizonY && my < height * 0.75;
+    const surfaceY = horizonY - sunsetConfig.horizonOffset;
+    // Match the beach's first ellipse so fins stay in open water rather than the dry sand.
+    const sandRadiusY = (height - horizonY + 100) * 0.5;
+    const relativeX = (x - width * 0.5) / width;
+    const shorelineY = height - 50 - sandRadiusY * Math.sqrt(Math.max(0, 1 - relativeX ** 2));
+    return { surfaceY, shorelineY };
+}
+
+function checkWaterClick(mx, my) {
+    const water = getOpenWaterBounds(mx);
+    return my >= water.surfaceY && my < water.shorelineY
+        && water.shorelineY - water.surfaceY > sharkFinConfig.minimumWaterDepth;
 }
 
 function checkSandClick(mx, my) {
@@ -1561,14 +1578,19 @@ function checkSailboatClick(mx, my) {
 }
 
 function createSharkFin(x, y) {
+    const water = getOpenWaterBounds(x);
+    const depth = water.shorelineY - water.surfaceY;
+    const size = Math.min(sharkFinConfig.size, Math.max(4, depth - 6));
+    const waterline = Math.min(water.shorelineY - sharkFinConfig.shorelineMargin,
+        Math.max(water.surfaceY + size + 1, y + sharkFinConfig.waterlineOffset));
     const direction = x < width / 2 ? 1 : -1;
     sharkFins.push({
         x: x,
-        y: y + 8,
+        y: waterline,
         direction: direction,
         speed: direction * 1.6,
         angle: 0,
-        size: 26
+        size,
     });
 }
 
