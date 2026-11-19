@@ -35,6 +35,9 @@ const sharkFinConfig = {
     offscreenMargin: 64,
     rimWidth: 0.7,
     rimOpacity: 0.24,
+    reflectionScale: 0.45,
+    reflectionBands: 5,
+    reflectionOpacity: 0.15,
     palette: {
         day: { body: [46, 53, 60], highlight: [69, 78, 85], trailing: [35, 42, 49] },
         night: { body: [30, 39, 52], highlight: [55, 68, 83], trailing: [25, 33, 46] }
@@ -1666,6 +1669,7 @@ function drawSharkFin(fin) {
     const visibility = getFinVisibility(fin);
     drawingContext.save();
     drawingContext.translate(fin.x, fin.y);
+    drawFinReflection(fin, visibility);
     drawFinSilhouette(fin, visibility);
     drawingContext.restore();
 }
@@ -1685,6 +1689,32 @@ function drawFinSilhouette(fin, visibility) {
     context.strokeStyle = getFinColor('highlight', sharkFinConfig.rimOpacity);
     context.lineWidth = sharkFinConfig.rimWidth / fin.size;
     context.stroke(sharkFinPaths.leadingEdge);
+    context.restore();
+}
+
+function drawFinReflection(fin, visibility) {
+    const context = drawingContext;
+    const reflectionHeight = fin.size * sharkFinConfig.reflectionScale;
+    const bandHeight = reflectionHeight / sharkFinConfig.reflectionBands;
+    context.save();
+    context.scale(-fin.direction, 1);
+    context.fillStyle = getFinColor('body', 0.12 * visibility);
+    context.beginPath();
+    context.ellipse(0, 1, fin.size * 0.85, fin.size * 0.06, 0, 0, Math.PI * 2);
+    context.fill();
+    // A few separated strips make a faint reflection without a second solid fin below the water.
+    for (let band = 0; band < sharkFinConfig.reflectionBands; band++) {
+        context.save();
+        context.beginPath();
+        context.rect(-fin.size, 1 + band * bandHeight, fin.size * 2, bandHeight * 0.65);
+        context.clip();
+        context.translate(sin(fin.age * 0.6 + band * 1.4) * 1.1, 0);
+        context.scale(fin.size, -fin.size * sharkFinConfig.reflectionScale);
+        const fade = 1 - band / sharkFinConfig.reflectionBands;
+        context.fillStyle = getFinColor('body', sharkFinConfig.reflectionOpacity * visibility * fade);
+        context.fill(sharkFinPaths.silhouette);
+        context.restore();
+    }
     context.restore();
 }
 
