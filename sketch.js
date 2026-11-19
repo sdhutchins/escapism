@@ -25,13 +25,22 @@ const sharkFinConfig = {
     speed: 36,
     maximumFins: 6,
     lifetimeSeconds: 45,
+    emergeSeconds: 0.75,
+    fadeSeconds: 1,
     bobAmplitude: 0.4,
     bobFrequency: 0.65,
     waterlineOffset: 8,
     shorelineMargin: 3,
     minimumWaterDepth: 8,
     offscreenMargin: 64,
+    rimWidth: 0.7,
+    rimOpacity: 0.24,
+    palette: {
+        day: { body: [46, 53, 60], highlight: [69, 78, 85], trailing: [35, 42, 49] },
+        night: { body: [30, 39, 52], highlight: [55, 68, 83], trailing: [25, 33, 46] }
+    }
 };
+const sharkFinPaths = createSharkFinPaths();
 const sceneModes = ['day', 'sunset', 'night'];
 const timeDialStops = [
     { value: 0, mode: 'day', label: 'Day' },
@@ -1583,6 +1592,21 @@ function checkSailboatClick(mx, my) {
     );
 }
 
+function createSharkFinPaths() {
+    const silhouette = new Path2D();
+    silhouette.moveTo(-0.85, 0);
+    silhouette.bezierCurveTo(-0.6, -0.1, -0.05, -0.85, 0.34, -0.96);
+    silhouette.bezierCurveTo(0.42, -1, 0.46, -0.92, 0.44, -0.79);
+    silhouette.bezierCurveTo(0.44, -0.6, 0.27, -0.47, 0.33, -0.28);
+    silhouette.bezierCurveTo(0.37, -0.13, 0.52, -0.05, 0.65, 0);
+    silhouette.closePath();
+    const leadingEdge = new Path2D();
+    leadingEdge.moveTo(-0.85, 0);
+    leadingEdge.bezierCurveTo(-0.6, -0.1, -0.05, -0.85, 0.34, -0.96);
+    leadingEdge.bezierCurveTo(0.42, -1, 0.46, -0.92, 0.44, -0.79);
+    return { silhouette, leadingEdge };
+}
+
 function createSharkFin(x, y) {
     const water = getOpenWaterBounds(x);
     const depth = water.shorelineY - water.surfaceY;
@@ -1596,12 +1620,17 @@ function createSharkFin(x, y) {
         y: waterline,
         baseY: waterline,
         direction,
-        angle: 0,
         speed: direction * sharkFinConfig.speed,
         size,
         age: 0,
         phase: random(TWO_PI),
     });
+}
+
+function getFinVisibility(fin) {
+    const amount = Math.max(0, Math.min(1, fin.age / sharkFinConfig.emergeSeconds,
+        (sharkFinConfig.lifetimeSeconds - fin.age) / sharkFinConfig.fadeSeconds));
+    return amount * amount * (3 - 2 * amount);
 }
 
 function updateAndDrawSharkFins() {
@@ -1610,7 +1639,6 @@ function updateAndDrawSharkFins() {
         const fin = sharkFins[index];
         fin.x += fin.speed * elapsedSeconds;
         fin.age += elapsedSeconds;
-        fin.angle += 0.05;
         const water = getOpenWaterBounds(fin.x);
         fin.y = Math.min(fin.baseY, water.shorelineY - sharkFinConfig.shorelineMargin)
             + sin(fin.age * sharkFinConfig.bobFrequency + fin.phase) * sharkFinConfig.bobAmplitude;
@@ -1619,7 +1647,7 @@ function updateAndDrawSharkFins() {
             sharkFins.splice(index, 1);
             continue;
         }
-        drawSharkFin(fin.x, fin.y, fin.direction, fin.angle, fin.size);
+        drawSharkFin(fin);
         if (frameCount % 10 === 0) {
             createFinRipples(fin.x, fin.y);
         }
@@ -1627,60 +1655,37 @@ function updateAndDrawSharkFins() {
     updateAndDrawFinRipples();
 }
 
-function drawSharkFin(x, y, direction, angle, size) {
-    push();
-    translate(x, y);
-    rotate(sin(angle) * 0.05);
+function getFinColor(name, opacity = 1) {
+    const day = sharkFinConfig.palette.day[name];
+    const night = sharkFinConfig.palette.night[name];
+    const blend = getNightBlend();
+    return `rgba(${lerp(day[0], night[0], blend)}, ${lerp(day[1], night[1], blend)}, ${lerp(day[2], night[2], blend)}, ${opacity})`;
+}
 
-    noStroke();
-    fill(28, 54, 76, 42);
-    ellipse(direction * size * 0.28, size * 0.4, size * 1.85, size * 0.28);
-    fill(28, 54, 76, 60);
-    ellipse(direction * size * 0.08, size * 0.34, size * 0.92, size * 0.2);
-    
-    scale(direction, 1);
+function drawSharkFin(fin) {
+    const visibility = getFinVisibility(fin);
+    drawingContext.save();
+    drawingContext.translate(fin.x, fin.y);
+    drawFinSilhouette(fin, visibility);
+    drawingContext.restore();
+}
 
-    fill(52, 60, 69);
-    beginShape();
-    vertex(-size * 0.46, size * 0.28);
-    bezierVertex(
-        -size * 0.24, size * 0.16,
-        size * 0.02, -size * 0.62,
-        size * 0.24, -size * 0.78
-    );
-    bezierVertex(
-        size * 0.34, -size * 0.7,
-        size * 0.42, -size * 0.22,
-        size * 0.36, size * 0.06
-    );
-    bezierVertex(
-        size * 0.26, size * 0.18,
-        size * 0.04, size * 0.24,
-        -size * 0.46, size * 0.28
-    );
-    endShape(CLOSE);
-
-    fill(80, 90, 98, 130);
-    beginShape();
-    vertex(-size * 0.16, size * 0.14);
-    bezierVertex(
-        -size * 0.02, -size * 0.02,
-        size * 0.1, -size * 0.42,
-        size * 0.2, -size * 0.58
-    );
-    bezierVertex(
-        size * 0.24, -size * 0.5,
-        size * 0.26, -size * 0.18,
-        size * 0.18, size * 0.06
-    );
-    bezierVertex(
-        size * 0.08, size * 0.12,
-        -size * 0.02, size * 0.14,
-        -size * 0.16, size * 0.14
-    );
-    endShape(CLOSE);
-    
-    pop();
+function drawFinSilhouette(fin, visibility) {
+    const context = drawingContext;
+    context.save();
+    // The reference profile faces left; mirror it so the leading edge faces the swim direction.
+    context.scale(-fin.direction * fin.size, fin.size);
+    context.globalAlpha *= visibility;
+    const shading = context.createLinearGradient(-0.85, -0.2, 0.55, -0.2);
+    shading.addColorStop(0, getFinColor('body'));
+    shading.addColorStop(0.35, getFinColor('highlight'));
+    shading.addColorStop(1, getFinColor('trailing'));
+    context.fillStyle = shading;
+    context.fill(sharkFinPaths.silhouette);
+    context.strokeStyle = getFinColor('highlight', sharkFinConfig.rimOpacity);
+    context.lineWidth = sharkFinConfig.rimWidth / fin.size;
+    context.stroke(sharkFinPaths.leadingEdge);
+    context.restore();
 }
 
 function updateAndDrawRain() {
