@@ -95,9 +95,44 @@ const cloudStyles = [
     }
 ];
 const cloudPaths = cloudStyles.map((style) => createCloudSilhouettePath(style.lobes));
+const cloudHitContext = document.createElement('canvas').getContext('2d');
 const cloudSprites = [];
 const cloudBlendSprites = [];
+const cloudControlConfig = {
+    rainCloudIndex: 0,
+    styleCloudIndex: 1,
+    dragTolerance: 10,
+    transitionSeconds: 0.16,
+    hintFadeSeconds: 0.12,
+    hintOpacity: 0.25,
+    focusOpacity: 0.8,
+    flipSeconds: 0.48
+};
 const cloudStyleState = { target: 0, blend: 0 };
+// Only the style cloud has a hover hint; keyboard focus remains visible on both features.
+const cloudHintState = {
+    pointerInside: false,
+    pointerX: 0,
+    pointerY: 0,
+    focusedIndex: null,
+    amount: 0
+};
+const cloudFlipState = {
+    open: false,
+    progress: 0,
+    from: 0,
+    elapsed: 0,
+    focusToggle: false
+};
+const cloudGesture = {
+    pointerId: null,
+    cloud: null,
+    startX: 0,
+    startY: 0,
+    cancelled: false,
+    ignoreTouchEnd: false
+};
+let cloudControls = null;
 // State: the requested mood, its visible position, and one captured gesture.
 const timeDialState = {
     target: 0,
@@ -468,6 +503,8 @@ function playDialTick() {
 function setup() {
     const canvas = createCanvas(windowWidth, windowHeight);
     canvas.parent('canvas-container');
+    canvas.attribute('aria-label', 'Interactive beach.');
+    initializeCloudControls(canvas.elt);
     
     colorMode(RGB, 255);
     initializeCloudSprites();
@@ -750,6 +787,8 @@ function updateAudioInterface() {
 
 function draw() {
     updateTimeDial();
+    updateCloudStyle();
+    updateCloudFlip();
     drawBeachScene();
     drawNightStars();
     updateAndDrawShootingStars();
@@ -1055,6 +1094,175 @@ function createShootingStar(star) {
     });
 }
 
+// Cloud input: the left cloud makes rain; the next flips over to reveal its style toggle.
+function initializeCloudControls(canvas) {
+    cloudControls = {
+        rain: document.getElementById('rain-cloud-control'),
+        style: document.getElementById('cloud-style-control'),
+        panel: document.getElementById('cloud-style-panel'),
+        toggle: document.getElementById('cloud-style-toggle'),
+        canvas
+    };
+    // Native buttons expose the drawn features to keyboard and assistive technology users.
+    for (const [button, index] of [
+        [cloudControls.rain, cloudControlConfig.rainCloudIndex],
+        [cloudControls.style, cloudControlConfig.styleCloudIndex]
+    ]) {
+        button.addEventListener('click', (event) => activateCloudFeature(index, event.detail === 0));
+        button.addEventListener('focus', () => { cloudHintState.focusedIndex = index; });
+        button.addEventListener('blur', () => { cloudHintState.focusedIndex = null; });
+    }
+    cloudControls.toggle.addEventListener('click', () => {
+        setCloudStyleValue(1 - cloudStyleState.target);
+    });
+    cloudControls.panel.addEventListener('keydown', (event) => {
+        if (event.key !== 'Escape') return;
+        event.preventDefault();
+        setCloudPanelOpen(false);
+        cloudControls.style.focus({ preventScroll: true });
+    });
+    cloudControls.panel.addEventListener('focusout', (event) => {
+        if (event.relatedTarget && !cloudControls.panel.contains(event.relatedTarget)) setCloudPanelOpen(false);
+    });
+    document.addEventListener('pointerdown', (event) => {
+        if (!cloudFlipState.open || cloudControls.panel.contains(event.target)
+            || event.target === cloudControls.style) return;
+        if (event.target === canvas) {
+            const point = getCloudPointer(event, canvas);
+            if (checkCloudClick(point.x, point.y)?.index === cloudControlConfig.styleCloudIndex) return;
+        }
+        setCloudPanelOpen(false);
+    }, { capture: true });
+    canvas.addEventListener('pointerdown', (event) => beginCloudGesture(event, canvas));
+    canvas.addEventListener('pointermove', (event) => {
+        if (event.pointerType !== 'touch') {
+            const point = getCloudPointer(event, canvas);
+            cloudHintState.pointerInside = true;
+            cloudHintState.pointerX = point.x;
+            cloudHintState.pointerY = point.y;
+        }
+        updateCloudGesture(event);
+    });
+    canvas.addEventListener('pointerleave', () => { cloudHintState.pointerInside = false; });
+    canvas.addEventListener('pointerup', finishCloudGesture);
+    canvas.addEventListener('pointercancel', cancelCloudGesture);
+    canvas.addEventListener('lostpointercapture', (event) => {
+        if (event.pointerId === cloudGesture.pointerId) cancelCloudGesture();
+    });
+    for (const eventName of ['resize', 'blur']) {
+        window.addEventListener(eventName, () => {
+            cancelCloudGesture();
+            cloudHintState.pointerInside = false;
+            setCloudPanelOpen(false);
+        });
+    }
+}
+
+function getCloudPointer(event, canvas) {
+    const bounds = canvas.getBoundingClientRect();
+    return {
+        x: (event.clientX - bounds.left) * width / bounds.width,
+        y: (event.clientY - bounds.top) * height / bounds.height
+    };
+}
+
+function isFeatureCloud(cloud) {
+    return cloud && (cloud.index === cloudControlConfig.rainCloudIndex
+        || cloud.index === cloudControlConfig.styleCloudIndex);
+}
+
+function beginCloudGesture(event, canvas) {
+    if (!event.isPrimary || event.button !== 0 || cloudGesture.pointerId !== null) return;
+    const point = getCloudPointer(event, canvas);
+    const cloud = checkCloudClick(point.x, point.y);
+    if (!isFeatureCloud(cloud) || checkSunClick(point.x, point.y) || checkSailboatClick(point.x, point.y)) return;
+    event.preventDefault();
+    // Pointer capture suppresses normal focus changes; leave the previous control without focusing the canvas.
+    document.activeElement?.blur?.();
+    canvas.setPointerCapture(event.pointerId);
+    cloudGesture.pointerId = event.pointerId;
+    cloudGesture.cloud = cloud;
+    cloudGesture.startX = event.clientX;
+    cloudGesture.startY = event.clientY;
+    cloudGesture.cancelled = false;
+}
+
+function updateCloudGesture(event) {
+    if (event.pointerId !== cloudGesture.pointerId) return;
+    const distance = Math.hypot(event.clientX - cloudGesture.startX, event.clientY - cloudGesture.startY);
+    if (distance > cloudControlConfig.dragTolerance) cloudGesture.cancelled = true;
+}
+
+function finishCloudGesture(event) {
+    if (event.pointerId !== cloudGesture.pointerId) return;
+    const cloud = cloudGesture.cloud;
+    const point = getCloudPointer(event, cloudControls.canvas);
+    const releasedCloud = checkCloudClick(point.x, point.y);
+    const shouldActivate = !cloudGesture.cancelled && releasedCloud?.index === cloud.index;
+    cloudGesture.ignoreTouchEnd = event.pointerType !== 'mouse';
+    cancelCloudGesture();
+    if (shouldActivate) activateCloudFeature(cloud.index);
+}
+
+function cancelCloudGesture() {
+    cloudGesture.pointerId = null;
+    cloudGesture.cloud = null;
+}
+
+function activateCloudFeature(index, focusToggle = false) {
+    const cloud = getCloudPositions()[index];
+    if (index === cloudControlConfig.rainCloudIndex) startRain(cloud.x, cloud.y);
+    if (index === cloudControlConfig.styleCloudIndex) {
+        setCloudPanelOpen(!cloudFlipState.open, focusToggle);
+    }
+}
+
+function setCloudStyleValue(value) {
+    cloudStyleState.target = Math.max(0, Math.min(cloudStyles.length - 1, Math.round(value)));
+    cloudControls.toggle.setAttribute('aria-checked', String(cloudStyleState.target === 1));
+}
+
+function setCloudPanelOpen(open, focusToggle = false) {
+    if (cloudFlipState.open === open) return;
+    cloudFlipState.open = open;
+    cloudFlipState.from = cloudFlipState.progress;
+    cloudFlipState.elapsed = 0;
+    cloudFlipState.focusToggle = open && focusToggle;
+    cloudControls.style.setAttribute('aria-expanded', String(open));
+    cloudControls.toggle.disabled = true;
+}
+
+function updateCloudFlip() {
+    const target = cloudFlipState.open ? 1 : 0;
+    if (cloudFlipState.progress === target) return;
+    cloudFlipState.elapsed += Math.min(deltaTime / 1000, 0.05);
+    const duration = cloudControlConfig.flipSeconds * Math.abs(target - cloudFlipState.from);
+    const progress = reducedMotionPreference.matches ? 1
+        : Math.min(1, cloudFlipState.elapsed / Math.max(0.001, duration));
+    const eased = progress * progress * (3 - 2 * progress);
+    cloudFlipState.progress = lerp(cloudFlipState.from, target, eased);
+    if (progress === 1) cloudFlipState.progress = target;
+}
+
+function getCloudFaceScale(index) {
+    return index === cloudControlConfig.styleCloudIndex ? Math.cos(Math.PI * cloudFlipState.progress) : 1;
+}
+
+function positionCloudPanel(cloud) {
+    const { panel, toggle, canvas } = cloudControls;
+    panel.hidden = cloudFlipState.progress <= 0.5;
+    if (panel.hidden) return;
+    const bounds = canvas.getBoundingClientRect();
+    panel.style.left = `${bounds.left + cloud.x * bounds.width / width}px`;
+    panel.style.top = `${bounds.top + cloud.y * bounds.height / height}px`;
+    panel.style.setProperty('--cloud-face-scale', String(Math.abs(getCloudFaceScale(cloud.index))));
+    toggle.disabled = !cloudFlipState.open || cloudFlipState.progress !== 1;
+    if (!toggle.disabled && cloudFlipState.focusToggle) {
+        if (document.activeElement === cloudControls.style) toggle.focus({ preventScroll: true });
+        cloudFlipState.focusToggle = false;
+    }
+}
+
 function createCloudSilhouettePath(lobes) {
     const silhouette = new Path2D();
     for (const [x, y, radiusX, radiusY] of lobes) {
@@ -1130,6 +1338,17 @@ function paintCloudStyle(sprite, size, bounds, styleIndex) {
     context.restore();
 }
 
+function updateCloudStyle() {
+    const previous = cloudStyleState.blend;
+    const amount = reducedMotionPreference.matches ? 1
+        : 1 - Math.exp(-Math.min(deltaTime / 1000, 0.05) / cloudControlConfig.transitionSeconds);
+    cloudStyleState.blend += (cloudStyleState.target - cloudStyleState.blend) * amount;
+    if (Math.abs(cloudStyleState.target - cloudStyleState.blend) < 0.001) {
+        cloudStyleState.blend = cloudStyleState.target;
+    }
+    if (previous !== cloudStyleState.blend) blendCloudSprites();
+}
+
 function blendCloudSprites() {
     for (let index = 0; index < cloudAppearance.count; index++) {
         const context = cloudBlendSprites[index].graphic.drawingContext;
@@ -1153,10 +1372,68 @@ function drawClouds() {
         const sprite = cloudBlendSprites[cloud.index];
         drawingContext.save();
         drawingContext.translate(cloud.x, cloud.y);
+        drawingContext.scale(getCloudFaceScale(cloud.index), 1);
         drawingContext.drawImage(sprite.graphic.canvas, sprite.offsetX, sprite.offsetY);
         drawingContext.restore();
     }
     drawingContext.restore();
+    drawCloudFeatureHints(clouds);
+    positionCloudPanel(clouds[cloudControlConfig.styleCloudIndex]);
+}
+
+function drawCloudFeatureHints(clouds) {
+    const styleIndex = cloudControlConfig.styleCloudIndex;
+    const hovered = cloudHintState.pointerInside
+        ? checkCloudClick(cloudHintState.pointerX, cloudHintState.pointerY) : null;
+    const focused = cloudHintState.focusedIndex === styleIndex;
+    const visible = !cloudFlipState.open && cloudFlipState.progress === 0
+        && (hovered?.index === styleIndex || focused);
+    const amount = reducedMotionPreference.matches ? 1
+        : 1 - Math.exp(-Math.min(deltaTime / 1000, 0.05) / cloudControlConfig.hintFadeSeconds);
+    cloudHintState.amount += ((visible ? 1 : 0) - cloudHintState.amount) * amount;
+    if (cloudHintState.amount > 0.01 && cloudFlipState.progress === 0) {
+        drawCloudFeatureIcon(clouds[styleIndex], cloudHintState.amount, focused);
+    }
+    if (cloudHintState.focusedIndex === cloudControlConfig.rainCloudIndex) {
+        // The rain cloud has no icon; tracing its edge provides a keyboard-only focus indicator.
+        const cloud = clouds[cloudControlConfig.rainCloudIndex];
+        const context = drawingContext;
+        context.save();
+        context.translate(cloud.x, cloud.y);
+        context.scale(cloud.size, cloud.size);
+        context.strokeStyle = `rgba(45, 77, 88, ${cloudControlConfig.focusOpacity})`;
+        context.lineWidth = 1.5 / cloud.size;
+        context.stroke(cloudPaths[cloudStyleState.target]);
+        context.restore();
+    }
+}
+
+function drawCloudFeatureIcon(cloud, opacity, focused) {
+    const context = drawingContext;
+    context.save();
+    context.translate(cloud.x, cloud.y);
+    const strength = focused ? cloudControlConfig.focusOpacity : cloudControlConfig.hintOpacity;
+    context.strokeStyle = `rgba(45, 77, 88, ${opacity * strength})`;
+    context.lineWidth = 1.5;
+    context.lineCap = 'round';
+    context.lineJoin = 'round';
+    if (focused) {
+        context.beginPath();
+        context.arc(0, 0, 13, 0, Math.PI * 2);
+        context.stroke();
+    }
+    context.beginPath();
+    context.arc(0, 0, 6, Math.PI, 0);
+    context.moveTo(3, -3);
+    context.lineTo(6, 0);
+    context.lineTo(8, -4);
+    context.moveTo(6, 0);
+    context.arc(0, 0, 6, 0, Math.PI);
+    context.moveTo(-3, 3);
+    context.lineTo(-6, 0);
+    context.lineTo(-8, 4);
+    context.stroke();
+    context.restore();
 }
 
 function getCloudPositions() {
@@ -1180,13 +1457,17 @@ function getCloudPositions() {
 }
 
 function checkCloudClick(mx, my) {
-    const clouds = getCloudPositions();
-    
-    for (let cloud of clouds) {
-        const distance = dist(mx, my, cloud.x, cloud.y);
-        if (distance < cloud.size) {
-            return { x: cloud.x, y: cloud.y };
-        }
+    // Match painting order where cloud silhouettes overlap, especially on narrow screens.
+    for (const cloud of getCloudPositions().reverse()) {
+        const faceScale = getCloudFaceScale(cloud.index);
+        if (Math.abs(faceScale) < 0.03) continue;
+        const x = (mx - cloud.x) / (cloud.size * faceScale);
+        const y = (my - cloud.y) / cloud.size;
+        const containsPoint = cloudPaths.some((path, index) => {
+            const weight = index === 0 ? 1 - cloudStyleState.blend : cloudStyleState.blend;
+            return weight > 0.05 && cloudHitContext.isPointInPath(path, x, y);
+        });
+        if (containsPoint) return cloud;
     }
     return null;
 }
@@ -1847,7 +2128,8 @@ function createSandMark(startX, startY, endX, endY) {
 }
 
 function mousePressed(event) {
-    if (event?.target?.closest('.time-dial')) return;
+    if (event?.target?.closest('.time-dial, .cloud-style-panel') || (event && event.button !== 0)) return;
+    if (cloudGesture.pointerId !== null) return;
     const clickedSailboat = checkSailboatClick(mouseX, mouseY);
     const clickedSun = checkSunClick(mouseX, mouseY);
     const clickedNightStar = checkNightStarClick(mouseX, mouseY);
@@ -1862,7 +2144,7 @@ function mousePressed(event) {
     } else if (clickedNightStar) {
         createShootingStar(clickedNightStar);
     } else if (clickedCloud) {
-        startRain(clickedCloud.x, clickedCloud.y);
+        return;
     } else if (clickedWater) {
         createSharkFin(mouseX, mouseY);
     } else if (clickedSand) {
@@ -1897,7 +2179,8 @@ function mouseReleased() {
 }
 
 function touchStarted(event) {
-    if (event?.target?.closest('.time-dial')) return true;
+    if (event?.target?.closest('.time-dial, .cloud-style-panel')) return true;
+    if (cloudGesture.pointerId !== null) return false;
     const clickedSailboat = checkSailboatClick(mouseX, mouseY);
     const clickedSun = checkSunClick(mouseX, mouseY);
     const clickedNightStar = checkNightStarClick(mouseX, mouseY);
@@ -1912,7 +2195,7 @@ function touchStarted(event) {
     } else if (clickedNightStar) {
         createShootingStar(clickedNightStar);
     } else if (clickedCloud) {
-        startRain(clickedCloud.x, clickedCloud.y);
+        return false;
     } else if (clickedWater) {
         createSharkFin(mouseX, mouseY);
     } else if (clickedSand) {
@@ -1929,7 +2212,8 @@ function touchStarted(event) {
 }
 
 function touchMoved(event) {
-    if (event?.target?.closest('.time-dial')) return true;
+    if (event?.target?.closest('.time-dial, .cloud-style-panel')) return true;
+    if (cloudGesture.pointerId !== null) return false;
     if (isDragging) {
         const distance = dist(mouseX, mouseY, lastMouseX, lastMouseY);
         if (distance > 8) {
@@ -1946,7 +2230,12 @@ function touchMoved(event) {
 }
 
 function touchEnded(event) {
-    if (event?.target?.closest('.time-dial')) return true;
+    if (event?.target?.closest('.time-dial, .cloud-style-panel')) return true;
+    if (cloudGesture.ignoreTouchEnd) {
+        cloudGesture.ignoreTouchEnd = false;
+        isDragging = false;
+        return true;
+    }
     isDragging = false;
     return false;
 }

@@ -18,6 +18,17 @@
 <body>
     <main>
         <div id="canvas-container"></div>
+        <button type="button" id="rain-cloud-control" class="visually-hidden">Make the left cloud rain</button>
+        <button type="button" id="cloud-style-control" class="visually-hidden"
+            aria-expanded="false" aria-controls="cloud-style-panel">Cloud style options</button>
+        <div id="cloud-style-panel" class="cloud-style-panel" hidden>
+            <button type="button" id="cloud-style-toggle" class="cloud-style-switch" role="switch"
+                aria-label="Natural clouds" aria-checked="false">
+                <span class="cloud-style-switch__selection" aria-hidden="true"></span>
+                <span aria-hidden="true">Soft</span>
+                <span aria-hidden="true">Natural</span>
+            </button>
+        </div>
         <div class="time-dial" id="time-dial">
             <div class="time-dial__window" aria-hidden="true">
                 <div class="time-dial__ruler">
